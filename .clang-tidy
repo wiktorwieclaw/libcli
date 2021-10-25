@@ -1,0 +1,15 @@
+Checks: '
+-*,
+bugprone-*,
+cert-*,
+cppcoreguidelines-*,
+modernize-*,
+readability-*,
+-readability-braces-around-statements,
+performance-*,
+clang-analyzer-*,
+performance-*,
+hicpp-*,
+-hicpp-special-member-functions,
+-hicpp-avoid-c-arrays,
+'

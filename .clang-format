@@ -1,0 +1,12 @@
+BasedOnStyle: Google
+IndentWidth: 4
+BreakBeforeBraces: Stroustrup
+AlignAfterOpenBracket: AlwaysBreak
+AllowAllParametersOfDeclarationOnNextLine: false
+AllowAllArgumentsOnNextLine: false
+AllowShortFunctionsOnASingleLine: All
+BinPackParameters: false
+BinPackArguments: false
+AlwaysBreakAfterDefinitionReturnType: None
+AlwaysBreakAfterReturnType: None
+PenaltyReturnTypeOnItsOwnLine: 1000
