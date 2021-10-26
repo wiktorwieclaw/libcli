@@ -9,6 +9,10 @@
 #include "algorithms.hpp"
 #include "option.hpp"
 
+bool is_option(std::string_view str) {
+    return str.starts_with('-');
+}
+
 struct cli_t {
    public:
     template <typename T>
@@ -22,17 +26,9 @@ struct cli_t {
         int argc,
         char* argv[])  // NOLINT(cppcoreguidelines-avoid-c-arrays)
     {
-        auto args = std::vector<std::string_view>{};
-        for (auto i = 1; i < argc; ++i) {
-            args.emplace_back(argv[i]);
-        }
-
+        auto args = std::vector<std::string_view>(argv + 1, argv + argc);
         auto opt_its = std::vector<decltype(args)::iterator>{};
-        find_all_if(
-            args.begin(),
-            args.end(),
-            std::back_inserter(opt_its),
-            [](auto& s) { return s.starts_with('-'); });
+        find_all_if(args, back_inserter(opt_its), is_option);
 
         for (auto it = opt_its.rbegin(); it != opt_its.rend(); ++it) {
             auto& opt = find_option(**it);

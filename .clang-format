@@ -9,4 +9,5 @@ BinPackParameters: false
 BinPackArguments: false
 AlwaysBreakAfterDefinitionReturnType: None
 AlwaysBreakAfterReturnType: None
+IndentRequires: true
 PenaltyReturnTypeOnItsOwnLine: 1000
