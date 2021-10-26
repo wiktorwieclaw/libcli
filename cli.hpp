@@ -9,7 +9,7 @@
 #include "algorithms.hpp"
 #include "option.hpp"
 
-bool is_option(std::string_view str) {
+auto is_option(std::string_view str) -> bool {
     return str.starts_with('-');
 }
 
@@ -32,11 +32,11 @@ struct cli_t {
 
         for (auto it = opt_its.rbegin(); it != opt_its.rend(); ++it) {
             auto& opt = find_option(**it);
-            if (*it + 1 + opt.var->num() > args.end()) {
+            if (*it + 1 + opt.num_args() > args.end()) {
                 throw std::runtime_error{"parse"};
             }
-            opt.var->parse(std::span{*it + 1, opt.var->num()});
-            args.erase(*it, *it + 1 + opt.var->num());
+            opt.parse(std::span{*it + 1, opt.num_args()});
+            args.erase(*it, *it + 1 + opt.num_args());
         }
     }
 
@@ -44,7 +44,7 @@ struct cli_t {
     auto find_option(std::string_view option) -> option_t&
     {
         auto it = std::ranges::find_if(options, [=](auto& o) {
-            return o.short_name == option || o.long_name == option;
+            return o.short_name() == option || o.long_name() == option;
         });
         if (it == options.end()) {
             throw std::runtime_error{"find_option"};

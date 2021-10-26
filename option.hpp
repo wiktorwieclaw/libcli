@@ -46,17 +46,24 @@ struct var_t<bool> : var_base_t {
 };
 
 struct option_t {
-    std::string long_name;
-    std::string short_name;
-    std::unique_ptr<var_base_t> var;
-
     template <typename T>
     option_t(std::string_view long_name, std::string_view short_name, T& var)
-        : long_name{long_name.data(), long_name.size()},
-          short_name{short_name.data(), short_name.size()},
+        : long_name_{long_name.data(), long_name.size()},
+          short_name_{short_name.data(), short_name.size()},
           var{std::make_unique<var_t<T>>(var)}
     {
     }
+
+    auto long_name() -> std::string_view { return long_name_; }
+    auto short_name() -> std::string_view { return short_name_; }
+    void parse(std::span<std::string_view> args) { return var->parse(args); }
+    auto num_args() { return var->num(); }
+
+   private:
+    std::string long_name_;
+    std::string short_name_;
+    std::unique_ptr<var_base_t> var;
+
 };
 
 #endif  // LIBCLI_OPTION_HPP
