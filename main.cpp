@@ -1,9 +1,9 @@
 #include <iostream>
+#include <optional>
 
 #include "cli.hpp"
 
-// TODO: support std::optional \
-         implement svtoi \
+// TODO: implement svtoi \
          multiple args for option
 
 auto main(int argc, char* argv[]) -> int
@@ -14,23 +14,34 @@ try {
     std::cout << std::endl;
 
     auto label = std::string{};
-    auto x = INT_MIN;
-    auto y = INT_MIN;
+    auto coords = std::pair<std::optional<int>, std::optional<int>>{
+        std::nullopt,
+        std::nullopt};
     auto is_pretty = false;
 
     auto cli = cli_t{};
     cli.add_option(label, "--label", "-l");
-    cli.add_option(x, "--x", "-x");
-    cli.add_option(y, "--y", "-y");
+    cli.add_option(coords, "--coords", "-c");
     cli.add_option(is_pretty, "--pretty", "-p");
     cli.parse(argc, argv);
 
-    if (is_pretty) { std::cout << "[PRETTY] "; }
-    if (!label.empty()) { std::cout << label << ": "; }
+    if (is_pretty) {
+        std::cout << "[PRETTY] ";
+    }
+    if (!label.empty()) {
+        std::cout << label << ": ";
+    }
     auto sum = 0;
-    if (x != INT_MIN) { sum += x; }
-    if (y != INT_MIN) { sum += y; }
-    if (x != INT_MIN || y != INT_MIN) { std::cout << sum; }
+    auto [x, y] = coords;
+    if (x) {
+        sum += *x;
+    }
+    if (y) {
+        sum += *y;
+    }
+    if (x || y) {
+        std::cout << sum;
+    }
     std::cout << '\n';
 }
 catch (std::exception const& e) {

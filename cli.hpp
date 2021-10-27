@@ -31,12 +31,15 @@ struct cli_t {
         find_all_if(args, back_inserter(opt_its), is_option);
 
         for (auto it = opt_its.rbegin(); it != opt_its.rend(); ++it) {
-            auto& opt = find_option(**it);
-            if (*it + 1 + opt.num_args() > args.end()) {
+            auto name_it = *it;
+            auto& opt = find_option(*name_it);
+            auto args_begin = name_it + 1;
+            auto args_end = args_begin + opt.num_args();
+            if (args_end > args.end()) {
                 throw std::runtime_error{"parse"};
             }
-            opt.parse(std::span{*it + 1, opt.num_args()});
-            args.erase(*it, *it + 1 + opt.num_args());
+            opt.parse(std::span{args_begin, args_end});
+            args.erase(name_it, args_end);
         }
     }
 

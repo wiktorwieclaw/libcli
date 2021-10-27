@@ -17,32 +17,16 @@ template <typename T>
 struct var_t : var_base_t {
     explicit var_t(T& var) : var{&var} {}
 
-    auto num() -> std::size_t override { return 1; }
+    auto num() -> std::size_t override { return parser_t<T>::num_args; }
 
     void parse(std::span<std::string_view> args) override
     {
         assert(args.size() == num());
-        *var = ::parse<T>(args.front());
+        *var = parser_t<T>::parse(args);
     }
 
    private:
     T* var;
-};
-
-template <>
-struct var_t<bool> : var_base_t {
-    explicit var_t(bool& var) : var{&var} {}
-
-    auto num() -> std::size_t override { return 0; }
-
-    void parse(std::span<std::string_view> args) override
-    {
-        assert(args.size() == num());
-        *var = true;
-    }
-
-   private:
-    bool* var;
 };
 
 struct option_t {
@@ -63,7 +47,6 @@ struct option_t {
     std::string long_name_;
     std::string short_name_;
     std::unique_ptr<var_base_t> var;
-
 };
 
 #endif  // LIBCLI_OPTION_HPP
