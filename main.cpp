@@ -33,15 +33,9 @@ try {
     }
     auto sum = 0;
     auto [x, y] = coords;
-    if (x) {
-        sum += *x;
-    }
-    if (y) {
-        sum += *y;
-    }
-    if (x || y) {
-        std::cout << sum;
-    }
+    if (x) sum += *x;
+    if (y) sum += *y;
+    if (x || y) std::cout << sum;
     std::cout << '\n';
 }
 catch (std::exception const& e) {

@@ -17,12 +17,12 @@ template <typename T>
 struct var_t : var_base_t {
     explicit var_t(T& var) : var{&var} {}
 
-    auto num() -> std::size_t override { return parser_t<T>::num_args; }
+    auto num() -> std::size_t override { return num_args<T>; }
 
     void parse(std::span<std::string_view> args) override
     {
         assert(args.size() == num());
-        *var = parser_t<T>::parse(args);
+        *var = parser_t<T>::parse(args.template subspan<0, num_args<T>>());
     }
 
    private:

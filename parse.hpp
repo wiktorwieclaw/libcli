@@ -3,38 +3,37 @@
 
 #include <span>
 #include <string>
-#include <optional>
-#include <utility>
 
 template <typename T>
 struct parser_t {
-    static constexpr std::size_t num_args = 0;
-
-    static auto parse(std::span<std::string_view> args) -> T = delete;
+    static auto parse(std::span<std::string_view, 0> args) -> T = delete;
 };
+
+template <typename T, std::size_t size>
+constexpr auto num_args_impl(T (*)(std::span<std::string_view, size>))
+{
+    return size;
+}
+
+template <typename T>
+constexpr auto num_args = num_args_impl(parser_t<T>::parse);
 
 template <>
 struct parser_t<bool> {
-    static constexpr std::size_t num_args = 0;
-
-    static auto parse(std::span<std::string_view> args) -> bool { return true; }
+    static auto parse(std::span<std::string_view, 0> args) { return true; }
 };
 
 template <>
 struct parser_t<int> {
-    static constexpr std::size_t num_args = 1;
-
-    static auto parse(std::span<std::string_view> args) -> int
+    static auto parse(std::span<std::string_view, 1> args)
     {
-        return std::stoi({args[0].data(), args[0].size()});
+        return std::stoi({args.front().data(), args.front().size()});
     }
 };
 
 template <>
 struct parser_t<std::string> {
-    static constexpr std::size_t num_args = 1;
-
-    static auto parse(std::span<std::string_view> args) -> std::string
+    static auto parse(std::span<std::string_view, 1> args) -> std::string
     {
         return {args.front().data(), args.front().size()};
     }
@@ -42,9 +41,8 @@ struct parser_t<std::string> {
 
 template <typename T>
 struct parser_t<std::optional<T>> {
-    static constexpr std::size_t num_args = parser_t<T>::num_args;
-
-    static auto parse(std::span<std::string_view> args) -> std::optional<T>
+    static auto parse(std::span<std::string_view, num_args<T>> args)
+        -> std::optional<T>
     {
         return {parser_t<T>::parse(args)};
     }
@@ -52,14 +50,14 @@ struct parser_t<std::optional<T>> {
 
 template <typename T, typename U>
 struct parser_t<std::pair<T, U>> {
-    static constexpr std::size_t num_args =
-        parser_t<T>::num_args + parser_t<U>::num_args;
-
-    static auto parse(std::span<std::string_view> args) -> std::pair<T, U>
+    static auto parse(
+        std::span<std::string_view, num_args<T> + num_args<U>> args)
+        -> std::pair<T, U>
     {
         return {
-            parser_t<T>::parse({args.begin(), args.begin() + 1}),
-            parser_t<U>::parse({args.begin() + 1, args.end()})};
+            parser_t<T>::parse(args.template subspan<0, num_args<T>>()),
+            parser_t<U>::parse(
+                args.template subspan<num_args<T>, num_args<U>>())};
     }
 };
 
