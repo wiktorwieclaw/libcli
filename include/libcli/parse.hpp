@@ -10,7 +10,7 @@ struct parser_t {
 };
 
 template <typename T, std::size_t size>
-constexpr auto num_args_impl(T (*)(std::span<std::string_view, size>))
+constexpr auto num_args_impl(T (* /**/)(std::span<std::string_view, size>))
 {
     return size;
 }

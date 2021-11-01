@@ -9,9 +9,7 @@
 #include "algorithms.hpp"
 #include "option.hpp"
 
-auto is_option(std::string_view str) -> bool {
-    return str.starts_with('-');
-}
+auto is_option(std::string_view str) -> bool { return str.starts_with('-'); }
 
 struct cli_t {
    public:
@@ -24,23 +22,25 @@ struct cli_t {
 
     void parse(
         int argc,
-        char* argv[])  // NOLINT(cppcoreguidelines-avoid-c-arrays)
+        const char* argv[])  // NOLINT(cppcoreguidelines-avoid-c-arrays)
     {
+        [[maybe_unused]] auto name = argv[0];
         auto args = std::vector<std::string_view>(argv + 1, argv + argc);
-        auto opt_its = std::vector<decltype(args)::iterator>{};
-        find_all_if(args, back_inserter(opt_its), is_option);
+        auto option_its = std::vector<decltype(args)::iterator>{};
+        find_all_if(args, back_inserter(option_its), is_option);
 
-        for (auto it = opt_its.rbegin(); it != opt_its.rend(); ++it) {
-            auto name_it = *it;
-            auto& opt = find_option(*name_it);
-            auto args_begin = name_it + 1;
-            auto args_end = args_begin + opt.num_args();
-            if (args_end > args.end()) {
-                throw std::runtime_error{"parse"};
-            }
-            opt.parse(std::span{args_begin, args_end});
-            args.erase(name_it, args_end);
-        }
+        std::for_each(
+            option_its.rbegin(),
+            option_its.rend(),
+            [this, &args](auto name_it) {
+                auto& opt = find_option(*name_it);
+                auto first_arg_it = name_it + 1;
+                if (first_arg_it + opt.num_args() > args.end()) {
+                    throw std::runtime_error{"parse"};
+                }
+                opt.parse({first_arg_it, opt.num_args()});
+                args.erase(name_it, name_it + 1 + opt.num_args());
+            });
     }
 
    private:
