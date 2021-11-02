@@ -9,7 +9,13 @@
 #include "algorithms.hpp"
 #include "option.hpp"
 
+namespace libcli {
+
+namespace detail {
+
 auto is_option(std::string_view str) -> bool { return str.starts_with('-'); }
+
+}  // namespace detail
 
 struct cli_t {
    public:
@@ -27,7 +33,7 @@ struct cli_t {
         [[maybe_unused]] auto name = argv[0];
         auto args = std::vector<std::string_view>(argv + 1, argv + argc);
         auto option_its = std::vector<decltype(args)::iterator>{};
-        find_all_if(args, back_inserter(option_its), is_option);
+        detail::find_all_if(args, back_inserter(option_its), detail::is_option);
 
         std::for_each(
             option_its.rbegin(),
@@ -57,5 +63,7 @@ struct cli_t {
 
     std::vector<option_t> options;
 };
+
+}  // namespace libcli
 
 #endif  // LIBCLI_CLI_HPP
