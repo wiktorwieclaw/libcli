@@ -4,56 +4,35 @@
 #include <span>
 #include <string>
 
-#include "parser_utils.hpp"
-
 namespace libcli {
 
 template <typename T>
-struct parser_t;
+auto parse(std::string_view arg) -> T = delete;
 
 template <>
-struct parser_t<bool> {
-    static auto parse(std::span<std::string_view, 0> args) { return true; }
-};
+auto parse<bool>(std::string_view arg) -> bool
+{
+    return true;
+}
 
 template <>
-struct parser_t<int> {
-    static auto parse(std::span<std::string_view, 1> args)
-    {
-        return std::stoi({args.front().data(), args.front().size()});
-    }
-};
+auto parse<int>(std::string_view arg) -> int
+{
+    // TODO svtoi
+    return std::stoi({arg.data(), arg.size()});
+}
 
 template <>
-struct parser_t<std::string> {
-    static auto parse(std::span<std::string_view, 1> args) -> std::string
-    {
-        return {args.front().data(), args.front().size()};
-    }
-};
+auto parse<std::string>(std::string_view arg) -> std::string
+{
+    return {arg.data(), arg.size()};
+}
 
-template <typename T>
-struct parser_t<std::optional<T>> {
-    static auto parse(std::span<std::string_view, parser_num_args<T>> args)
-        -> std::optional<T>
-    {
-        return {parser_t<T>::parse(args)};
-    }
-};
-
-template <typename T, typename U>
-struct parser_t<std::pair<T, U>> {
-    static auto parse(
-        std::span<std::string_view, parser_num_args<T> + parser_num_args<U>>
-            args) -> std::pair<T, U>
-    {
-        return {
-            parser_t<T>::parse(args.template subspan<0, parser_num_args<T>>()),
-            parser_t<U>::parse(args.template subspan<
-                               parser_num_args<T>,
-                               parser_num_args<U>>())};
-    }
-};
+//template <typename T>
+//auto parse<std::optional<T>>(std::string_view arg) -> std::optional<T>
+//{
+//    return {parse<T>(arg)};
+//}
 
 }  // namespace libcli
 

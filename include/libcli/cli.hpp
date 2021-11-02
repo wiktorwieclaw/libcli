@@ -13,11 +13,19 @@ namespace libcli {
 
 namespace detail {
 
+template <typename... Ts>
+struct Overloaded : Ts... {
+    using Ts::operator()...;
+};
+
+template <typename... Ts>
+Overloaded(Ts...) -> Overloaded<Ts...>;
+
 auto is_option(std::string_view str) -> bool { return str.starts_with('-'); }
 
 }  // namespace detail
 
-struct cli_t {
+struct Cli {
    public:
     template <typename T>
     auto add_option(T& var, std::string long_name, std::string short_name = "")
@@ -26,6 +34,7 @@ struct cli_t {
         return &options.front();
     }
 
+    // TODO: fix this monstrosity
     void parse(
         int argc,
         const char* argv[])  // NOLINT(cppcoreguidelines-avoid-c-arrays)
@@ -40,17 +49,26 @@ struct cli_t {
             option_its.rend(),
             [this, &args](auto name_it) {
                 auto& opt = find_option(*name_it);
-                auto first_arg_it = name_it + 1;
-                if (first_arg_it + opt.num_args() > args.end()) {
-                    throw std::runtime_error{"parse"};
-                }
-                opt.parse({first_arg_it, opt.num_args()});
-                args.erase(name_it, name_it + 1 + opt.num_args());
+                std::visit(
+                    detail::Overloaded{
+                        [&](detail::BoundFlag& x) {
+                            x.assign(true);
+                            args.erase(name_it, name_it + 1);
+                        },
+                        [&](std::unique_ptr<detail::BoundValueBase>& x) {
+                            auto first_arg_it = name_it + 1;
+                            if (first_arg_it > args.end()) {
+                                throw std::runtime_error{"parse"};
+                            }
+                            x->assign(*first_arg_it);
+                            args.erase(name_it, first_arg_it + 1);
+                        }},
+                    opt.bound_variable);
             });
     }
 
    private:
-    auto find_option(std::string_view option) -> option_t&
+    auto find_option(std::string_view option) -> Option&
     {
         auto it = std::ranges::find_if(options, [=](auto& o) {
             return o.short_name() == option || o.long_name() == option;
@@ -61,7 +79,7 @@ struct cli_t {
         return *it;
     }
 
-    std::vector<option_t> options;
+    std::vector<Option> options;
 };
 
 }  // namespace libcli

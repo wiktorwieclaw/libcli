@@ -13,7 +13,7 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(Catch2)
 
-add_library(${PROJECT_NAME} INTERFACE include/libcli/parser_utils.hpp)
+add_library(${PROJECT_NAME} INTERFACE)
 target_include_directories(${PROJECT_NAME} INTERFACE include/)
 
 add_executable(test test/main.cpp)

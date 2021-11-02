@@ -14,24 +14,21 @@ TEST_CASE("main test")
         "--label",
         "coords",
         "discardable",
-        "--coords",
+        "--number",
         "1",
-        "2",
         "-p"};
 
     auto label = std::string{};
-    auto coords = std::pair<std::optional<int>, std::optional<int>>{
-        std::nullopt,
-        std::nullopt};
-    auto is_pretty = false;
+    auto number = INT_MIN;
+    auto is_pretty_print = false;
 
-    auto cli = libcli::cli_t{};
+    auto cli = libcli::Cli{};
     cli.add_option(label, "--label", "-l");
-    cli.add_option(coords, "--coords", "-c");
-    cli.add_option(is_pretty, "--pretty", "-p");
+    cli.add_option(number, "--number", "-n");
+    cli.add_option(is_pretty_print, "--pretty-print", "-p");
     cli.parse(argv.size(), argv.data());
 
     REQUIRE(label == "coords");
-    REQUIRE(coords == std::pair{std::optional{1}, std::optional{2}});
-    REQUIRE(is_pretty == true);
+    REQUIRE(number == 1);
+    REQUIRE(is_pretty_print == true);
 }

@@ -4,6 +4,7 @@
 #include <cassert>
 #include <memory>
 #include <string>
+#include <variant>
 
 #include "parse.hpp"
 
@@ -11,55 +12,67 @@ namespace libcli {
 
 namespace detail {
 
-struct option_base_t {  // NOLINT(cppcoreguidelines-special-member-functions)
-    virtual ~option_base_t() = default;
-    virtual auto num_args() const -> std::size_t = 0;
-    virtual void parse(std::span<std::string_view> args) const = 0;
+struct BoundFlag {
+    explicit BoundFlag(bool& result) : result{&result} {}
+
+    void assign(bool flag) const
+    {
+        *result = flag;
+    }
+
+   private:
+    bool* result;
+};
+
+struct BoundValueBase { // NOLINT(cppcoreguidelines-special-member-functions)
+    virtual ~BoundValueBase() = default;
+    virtual void assign(std::string_view arg) const = 0;
 };
 
 template <typename T>
-struct option_impl_t : option_base_t {
-    explicit option_impl_t(T& result) : result{&result} {}
+struct BoundValue : BoundValueBase {
+    explicit BoundValue(T& result) : result{&result} {}
 
-    auto num_args() const -> std::size_t override { return parser_num_args<T>; }
-
-    void parse(std::span<std::string_view> args) const override
+    void assign(std::string_view arg) const override
     {
-        assert(args.size() == num_args());
-        *result =
-            parser_t<T>::parse(args.template subspan<0, parser_num_args<T>>());
+        *result = libcli::parse<T>(arg);
     }
 
    private:
     T* result;
 };
 
+using BoundVariable = std::variant<BoundFlag, std::unique_ptr<BoundValueBase>>;
+
+template <typename T>
+auto make_bound_variable(T& result) -> std::unique_ptr<BoundValueBase> {
+    return std::make_unique<BoundValue<T>>(result);
+}
+
+auto make_bound_variable(bool& result) -> BoundFlag {
+    return BoundFlag{result};
+}
+
 }  // namespace detail
 
-struct option_t {
+struct Option {
     template <typename T>
-    option_t(std::string_view long_name, std::string_view short_name, T& result)
+    Option(std::string_view long_name, std::string_view short_name, T& result)
         : long_name_{long_name.data(), long_name.size()},
           short_name_{short_name.data(), short_name.size()},
-          impl{std::make_unique<detail::option_impl_t<T>>(result)}
+          bound_variable{detail::make_bound_variable(result)}
     {
     }
 
     auto long_name() const -> std::string_view { return long_name_; }
     auto short_name() const -> std::string_view { return short_name_; }
-    auto num_args() const { return impl->num_args(); }
 
    private:
-    void parse(std::span<std::string_view> args) const
-    {
-        return impl->parse(args);
-    }
-
-    friend class cli_t;
+    friend class Cli;
 
     std::string long_name_;
     std::string short_name_;
-    std::unique_ptr<detail::option_base_t> impl;
+    detail::BoundVariable bound_variable;
 };
 
 }  // namespace libcli
