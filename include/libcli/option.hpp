@@ -67,25 +67,26 @@ auto make_bound_variable(bool& result) -> BoundFlag
 
 }  // namespace detail
 
+struct OptionInfo {
+    std::string long_name;
+    std::string short_name;
+};
+
+namespace detail {
+
 struct Option {
     template <typename T>
-    Option(std::string_view long_name, std::string_view short_name, T& result)
-        : long_name_{long_name.data(), long_name.size()},
-          short_name_{short_name.data(), short_name.size()},
+    Option(std::string long_name, std::string short_name, T& result)
+        : info{std::move(long_name), std::move(short_name)},
           bound_variable{detail::make_bound_variable(result)}
     {
     }
 
-    auto long_name() const -> std::string_view { return long_name_; }
-    auto short_name() const -> std::string_view { return short_name_; }
-
-   private:
-    friend class Cli;
-
-    std::string long_name_;
-    std::string short_name_;
+    OptionInfo info;
     detail::BoundVariable bound_variable;
 };
+
+}  // namespace detail
 
 }  // namespace libcli
 

@@ -28,9 +28,10 @@ struct Cli {
    public:
     template <typename T>
     auto add_option(T& var, std::string long_name, std::string short_name = "")
+        -> OptionInfo const&
     {
-        options.emplace_back(long_name, short_name, var);
-        return &options.front();
+        options.emplace_back(std::move(long_name), std::move(short_name), var);
+        return options.back().info;
     }
 
     // TODO: fix this monstrosity
@@ -66,10 +67,10 @@ struct Cli {
     }
 
    private:
-    auto find_option(std::string_view option) -> Option&
+    auto find_option(std::string_view option) -> detail::Option&
     {
         auto it = std::ranges::find_if(options, [=](auto& o) {
-            return o.short_name() == option || o.long_name() == option;
+            return o.info.short_name == option || o.info.long_name == option;
         });
         if (it == options.end()) {
             throw std::runtime_error{"find_option"};
@@ -77,7 +78,7 @@ struct Cli {
         return *it;
     }
 
-    std::vector<Option> options;
+    std::vector<detail::Option> options;
 };
 
 }  // namespace libcli
