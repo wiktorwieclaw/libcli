@@ -32,7 +32,7 @@ struct BoundValueStorage : BoundValueStorageBase {
 
     void assign(std::string_view arg) const override
     {
-        *result = libcli::parse<T>(arg);
+        libcli::parse<T>(arg, *result);
     }
 
    private:

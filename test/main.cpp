@@ -1,11 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
-#include <iostream>
-#include <optional>
 
 #include "libcli/cli.hpp"
 
 // TODO: implement svtoi \
-         multiple args for option
 
 TEST_CASE("main test")
 {
