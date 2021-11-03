@@ -30,10 +30,7 @@ template <typename T>
 struct BoundValueStorage : BoundValueStorageBase {
     explicit BoundValueStorage(T& result) : result{&result} {}
 
-    void assign(std::string_view arg) const override
-    {
-        libcli::parse<T>(arg, *result);
-    }
+    void assign(std::string_view arg) const override { Parser<T>{}(arg, *result); }
 
    private:
     T* result;
@@ -78,12 +75,12 @@ struct Option {
     template <typename T>
     Option(std::string long_name, std::string short_name, T& result)
         : info{std::move(long_name), std::move(short_name)},
-          bound_variable{detail::make_bound_variable(result)}
+          bound_variable{make_bound_variable(result)}
     {
     }
 
     OptionInfo info;
-    detail::BoundVariable bound_variable;
+    BoundVariable bound_variable;
 };
 
 }  // namespace detail

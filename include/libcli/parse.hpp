@@ -8,12 +8,23 @@
 namespace libcli {
 
 template <typename T>
-void parse(std::string_view arg, T& result) {
-    auto ss = std::stringstream{};
-    ss << arg;
-    ss >> result;
-}
+struct Parser {
+    void operator()(std::string_view arg, T& result)
+    {
+        auto ss = std::stringstream{};
+        ss << arg;
+        ss >> result;
+    }
+};
 
+template <typename T>
+struct Parser<std::optional<T>> {
+    void operator()(std::string_view arg, std::optional<T>& result)
+    {
+        result = T{};
+        Parser<T>{}(arg, *result);
+    }
+};
 }  // namespace libcli
 
 #endif  // LIBCLI_PARSE_HPP
