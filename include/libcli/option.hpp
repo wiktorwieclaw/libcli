@@ -14,24 +14,21 @@ namespace detail {
 
 struct BoundFlag {
     explicit BoundFlag(bool& result) : result{&result} {}
-
-    void assign(bool flag) const
-    {
-        *result = flag;
-    }
+    void assign(bool flag) const { *result = flag; }
 
    private:
     bool* result;
 };
 
-struct BoundValueBase { // NOLINT(cppcoreguidelines-special-member-functions)
-    virtual ~BoundValueBase() = default;
+struct
+    BoundValueStorageBase {  // NOLINT(cppcoreguidelines-special-member-functions)
+    virtual ~BoundValueStorageBase() = default;
     virtual void assign(std::string_view arg) const = 0;
 };
 
 template <typename T>
-struct BoundValue : BoundValueBase {
-    explicit BoundValue(T& result) : result{&result} {}
+struct BoundValueStorage : BoundValueStorageBase {
+    explicit BoundValueStorage(T& result) : result{&result} {}
 
     void assign(std::string_view arg) const override
     {
@@ -42,14 +39,29 @@ struct BoundValue : BoundValueBase {
     T* result;
 };
 
-using BoundVariable = std::variant<BoundFlag, std::unique_ptr<BoundValueBase>>;
+struct BoundValue {
+    template <typename T>
+    explicit BoundValue(T& result)
+        : value_storage{std::make_unique<BoundValueStorage<T>>(result)}
+    {
+    }
+
+    void assign(std::string_view arg) const { value_storage->assign(arg); }
+
+   private:
+    std::unique_ptr<BoundValueStorageBase> value_storage;
+};
+
+using BoundVariable = std::variant<BoundFlag, BoundValue>;
 
 template <typename T>
-auto make_bound_variable(T& result) -> std::unique_ptr<BoundValueBase> {
-    return std::make_unique<BoundValue<T>>(result);
+auto make_bound_variable(T& result) -> BoundValue
+{
+    return BoundValue{result};
 }
 
-auto make_bound_variable(bool& result) -> BoundFlag {
+auto make_bound_variable(bool& result) -> BoundFlag
+{
     return BoundFlag{result};
 }
 

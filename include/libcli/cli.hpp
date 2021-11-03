@@ -6,7 +6,6 @@
 #include <span>
 #include <vector>
 
-#include "algorithms.hpp"
 #include "option.hpp"
 
 namespace libcli {
@@ -41,30 +40,29 @@ struct Cli {
     {
         [[maybe_unused]] auto name = argv[0];
         auto args = std::vector<std::string_view>(argv + 1, argv + argc);
-        auto option_its = std::vector<decltype(args)::iterator>{};
-        detail::find_all_if(args, back_inserter(option_its), detail::is_option);
-
-        std::for_each(
-            option_its.rbegin(),
-            option_its.rend(),
-            [this, &args](auto name_it) {
-                auto& opt = find_option(*name_it);
+        for (auto it = args.begin(); it < args.end();) {
+            if (detail::is_option(*it)) {
+                auto& opt = find_option(*it);
                 std::visit(
                     detail::Overloaded{
                         [&](detail::BoundFlag& x) {
                             x.assign(true);
-                            args.erase(name_it, name_it + 1);
+                            it = args.erase(it);
                         },
-                        [&](std::unique_ptr<detail::BoundValueBase>& x) {
-                            auto first_arg_it = name_it + 1;
-                            if (first_arg_it > args.end()) {
+                        [&](detail::BoundValue& x) {
+                            auto value_it = it + 1;
+                            if (value_it > args.end()) {
                                 throw std::runtime_error{"parse"};
                             }
-                            x->assign(*first_arg_it);
-                            args.erase(name_it, first_arg_it + 1);
+                            x.assign(*value_it);
+                            it = args.erase(it, value_it + 1);
                         }},
                     opt.bound_variable);
-            });
+            }
+            else {
+                ++it;
+            }
+        }
     }
 
    private:
