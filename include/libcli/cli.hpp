@@ -20,7 +20,10 @@ struct Overloaded : Ts... {
 template <typename... Ts>
 Overloaded(Ts...) -> Overloaded<Ts...>;
 
-auto is_option(std::string_view str) -> bool { return str.starts_with('-'); }
+auto is_option_str(std::string_view str) -> bool
+{
+    return str.starts_with('-');
+}
 
 }  // namespace detail
 
@@ -34,6 +37,12 @@ struct Cli {
         return options.back().info;
     }
 
+    template <typename T>
+    void add_argument(T& var)
+    {
+        arguments.emplace_back(var);
+    }
+
     // TODO: fix this monstrosity
     void parse(
         int argc,
@@ -42,20 +51,20 @@ struct Cli {
         [[maybe_unused]] auto name = argv[0];
         auto args = std::vector<std::string_view>(argv + 1, argv + argc);
         for (auto it = args.begin(); it < args.end();) {
-            if (detail::is_option(*it)) {
+            if (detail::is_option_str(*it)) {
                 auto& opt = find_option(*it);
                 std::visit(
                     detail::Overloaded{
                         [&](detail::BoundFlag& x) {
-                            x.assign(true);
+                            x.set();
                             it = args.erase(it);
                         },
                         [&](detail::BoundValue& x) {
                             auto value_it = it + 1;
-                            if (value_it > args.end()) {
+                            if (value_it >= args.end()) {
                                 throw std::runtime_error{"parse"};
                             }
-                            x.assign(*value_it);
+                            x.assign_parsed(*value_it);
                             it = args.erase(it, value_it + 1);
                         }},
                     opt.bound_variable);
@@ -64,6 +73,31 @@ struct Cli {
                 ++it;
             }
         }
+
+        // TODO assert only one multiarg \
+            multiarg needs at least 1 arg \
+            error handling
+        auto index = 0;
+        for (auto it = arguments.begin(); it < arguments.end(); ++it) {
+            std::visit(
+                detail::Overloaded{
+                    [&](detail::BoundContainer& x) {
+                        auto num_lhs_args = it - arguments.begin();
+                        auto num_rhs_args = arguments.end() - it;
+                        auto args_to_take =
+                            args.size() - num_lhs_args - num_rhs_args + 1;
+
+                        auto span =
+                            std::span{args.begin() + index, args_to_take};
+                        x.assign_parsed(span);
+                        index += span.size();
+                    },
+                    [&](detail::BoundValue& x) {
+                        x.assign_parsed(args[index]);
+                        ++index;
+                    }},
+                it->bound_variable);
+        };
     }
 
    private:
@@ -79,6 +113,7 @@ struct Cli {
     }
 
     std::vector<detail::Option> options;
+    std::vector<detail::Argument> arguments;
 };
 
 }  // namespace libcli
