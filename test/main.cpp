@@ -1,8 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <complex>
 #include <iostream>
-
-#include "libcli/cli.hpp"
+#include <libcli.hpp>
 
 // TODO: -a -b -c written as -abc or -bac, etc. \
          https://www.gnu.org/software/libc/manual/html_node/Argument-Syntax.html
