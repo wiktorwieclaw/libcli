@@ -20,11 +20,6 @@ struct Overloaded : Ts... {
 template <typename... Ts>
 Overloaded(Ts...) -> Overloaded<Ts...>;
 
-auto is_option_str(std::string_view str) -> bool
-{
-    return str.starts_with('-');
-}
-
 }  // namespace detail
 
 struct Cli {
@@ -40,70 +35,22 @@ struct Cli {
     template <typename T>
     void add_argument(T& var)
     {
-        arguments.emplace_back(var);
+        positional_args.emplace_back(var);
     }
 
-    // TODO: fix this monstrosity
     void parse(
         int argc,
-        const char* argv[])  // NOLINT(cppcoreguidelines-avoid-c-arrays)
+        char const** argv)  // NOLINT(cppcoreguidelines-avoid-c-arrays)
     {
-        [[maybe_unused]] auto name = argv[0];
-        auto args = std::vector<std::string_view>(argv + 1, argv + argc);
-        for (auto it = args.begin(); it < args.end();) {
-            if (detail::is_option_str(*it)) {
-                auto& opt = find_option(*it);
-                std::visit(
-                    detail::Overloaded{
-                        [&](detail::BoundFlag& x) {
-                            x.set();
-                            it = args.erase(it);
-                        },
-                        [&](detail::BoundValue& x) {
-                            auto value_it = it + 1;
-                            if (value_it >= args.end()) {
-                                throw std::runtime_error{"parse"};
-                            }
-                            x.assign_parsed(*value_it);
-                            it = args.erase(it, value_it + 1);
-                        }},
-                    opt.bound_variable);
-            }
-            else {
-                ++it;
-            }
-        }
-
-        // TODO assert only one multiarg \
-            multiarg needs at least 1 arg \
-            error handling
-        auto index = 0;
-        for (auto it = arguments.begin(); it < arguments.end(); ++it) {
-            std::visit(
-                detail::Overloaded{
-                    [&](detail::BoundContainer& x) {
-                        auto num_lhs_args = it - arguments.begin();
-                        auto num_rhs_args = arguments.end() - it;
-                        auto args_to_take =
-                            args.size() - num_lhs_args - num_rhs_args + 1;
-
-                        auto span =
-                            std::span{args.begin() + index, args_to_take};
-                        x.assign_parsed(span);
-                        index += span.size();
-                    },
-                    [&](detail::BoundValue& x) {
-                        x.assign_parsed(args[index]);
-                        ++index;
-                    }},
-                it->bound_variable);
-        };
+        [[maybe_unused]] auto const* name = *argv;
+        auto unmatched = parse_options({argv + 1, argv + argc});
+        parse_positional_arguments(unmatched);
     }
 
    private:
     auto find_option(std::string_view option) -> detail::Option&
     {
-        auto it = std::ranges::find_if(options, [=](auto& o) {
+        auto it = std::ranges::find_if(options, [&](auto& o) {
             return o.info.short_name == option || o.info.long_name == option;
         });
         if (it == options.end()) {
@@ -112,8 +59,65 @@ struct Cli {
         return *it;
     }
 
+    auto parse_options(std::span<char const*> args) -> std::vector<char const**>
+    {
+        using namespace detail;
+        auto unmatched = std::vector<char const**>{};
+        for (auto it = args.begin(); it < args.end(); ++it) {
+            if (std::string_view{*it}.starts_with('-')) {
+                auto& opt = find_option(*it);
+                std::visit(
+                    Overloaded{
+                        [&](BoundFlag& x) { x.set(); },
+                        [&](BoundValue& x) {
+                            auto value_it = it + 1;
+                            if (value_it >= args.end()) {
+                                throw std::runtime_error{"parse"};
+                            }
+                            x.assign_parsed(*value_it);
+                            ++it;
+                        }},
+                    opt.bound_variable);
+            }
+            else {
+                unmatched.push_back(&*it);
+            }
+        }
+        return unmatched;
+    }
+
+    // TODO assert only one multiarg \
+            error handling
+    void parse_positional_arguments(std::span<char const**> args)
+    {
+        using namespace detail;
+        auto arg_it = args.begin();
+        for (auto it = positional_args.begin(); it < positional_args.end();
+             ++it) {
+            std::visit(
+                Overloaded{
+                    [&](BoundValue& x) {
+                        x.assign_parsed(**arg_it);
+                        ++arg_it;
+                    },
+                    [&](BoundContainer& x) {
+                        auto num_rhs_positional_args =
+                            positional_args.end() - (it + 1);
+                        auto limit = args.end() - num_rhs_positional_args;
+                        if (arg_it > limit) {
+                            throw std::runtime_error{"parse"};
+                        }
+                        while (arg_it < limit) {
+                            x.push_back_parsed(**arg_it);
+                            ++arg_it;
+                        }
+                    }},
+                it->bound_variable);
+        };
+    }
+
     std::vector<detail::Option> options;
-    std::vector<detail::Argument> arguments;
+    std::vector<detail::Argument> positional_args;
 };
 
 }  // namespace libcli

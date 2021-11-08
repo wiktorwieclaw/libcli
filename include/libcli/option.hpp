@@ -12,7 +12,7 @@ namespace libcli {
 namespace detail {
 
 template <typename T>
-void parse(std::string_view arg, T& result)
+inline void parse(std::string_view arg, T& result)
 {
     auto ss = std::stringstream{};
     ss << arg;
@@ -67,9 +67,9 @@ struct BoundContainer {
     {
     }
 
-    void assign_parsed(std::span<std::string_view> args) const
+    void push_back_parsed(std::string_view args) const
     {
-        storage->assign_parsed(args);
+        storage->push_back_parsed(args);
     }
 
     auto size() const -> std::size_t const { return storage->size(); }
@@ -77,7 +77,7 @@ struct BoundContainer {
    private:
     struct StorageBase {  // NOLINT(cppcoreguidelines-special-member-functions)
         virtual ~StorageBase() = default;
-        virtual void assign_parsed(std::span<std::string_view> args) const = 0;
+        virtual void push_back_parsed(std::string_view arg) const = 0;
         virtual auto size() const -> std::size_t = 0;
     };
 
@@ -85,13 +85,11 @@ struct BoundContainer {
     struct Storage : StorageBase {
         explicit Storage(Container& var) : var_ptr{&var} {}
 
-        void assign_parsed(std::span<std::string_view> args) const final
+        void push_back_parsed(std::string_view arg) const final
         {
-            for (auto arg : args) {
-                typename Container::value_type x{};
-                parse(arg, x);
-                var_ptr->push_back(x);
-            }
+            typename Container::value_type x{};
+            parse(arg, x);
+            var_ptr->push_back(x);
         }
 
         auto size() const -> std::size_t final { return var_ptr->size(); }
@@ -104,15 +102,18 @@ struct BoundContainer {
 };
 
 template <typename T>
-auto make_bound_variable(T& var) -> BoundValue
+inline auto make_bound_variable(T& var) -> BoundValue
 {
     return BoundValue{var};
 }
 
-auto make_bound_variable(bool& var) -> BoundFlag { return BoundFlag{var}; }
+inline auto make_bound_variable(bool& var) -> BoundFlag
+{
+    return BoundFlag{var};
+}
 
 template <typename T>
-auto make_bound_variable(std::vector<T>& var) -> BoundContainer
+inline auto make_bound_variable(std::vector<T>& var) -> BoundContainer
 {
     return BoundContainer{var};
 }
