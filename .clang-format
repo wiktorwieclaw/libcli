@@ -1,4 +1,5 @@
 BasedOnStyle: Google
+Standard: c++20
 IndentWidth: 4
 BreakBeforeBraces: Stroustrup
 AlignAfterOpenBracket: AlwaysBreak

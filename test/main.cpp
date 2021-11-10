@@ -6,7 +6,7 @@
 // TODO: -a -b -c written as -abc or -bac, etc. \
          https://www.gnu.org/software/libc/manual/html_node/Argument-Syntax.html
 
-template <libcli::Streamable T>
+template <libcli::streamable T>
 auto operator>>(std::istream& stream, std::optional<T>& o) -> std::istream&
 {
     o = T{};
@@ -36,7 +36,7 @@ TEST_CASE("main test")
     auto from = std::vector<std::string>{};
     auto to = std::string{};
 
-    auto cli = libcli::Cli{};
+    auto cli = libcli::cli{};
     cli.add_option(label, "--label", "-l");
     cli.add_option(number, "--number", "-n");
     cli.add_option(is_pretty_print, "--pretty-print", "-p");
