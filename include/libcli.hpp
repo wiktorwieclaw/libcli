@@ -2,6 +2,7 @@
 #define LIBCLI_CLI_HPP
 
 #include <algorithm>
+#include <concepts>
 #include <memory>
 #include <ranges>
 #include <span>
@@ -11,10 +12,14 @@
 
 namespace libcli {
 
+template <typename T>
+concept Streamable = requires(std::istream& is, T& x) {
+    {is >> x};
+};
+
 namespace detail {
 
-template <typename T>
-inline void parse(std::string_view arg, T& result)
+inline void parse(std::string_view arg, Streamable auto& result)
 {
     auto ss = std::stringstream{};
     ss << arg;
@@ -30,7 +35,7 @@ struct BoundFlag {
 };
 
 struct BoundValue {
-    template <typename T>
+    template <Streamable T>
     explicit BoundValue(T& var) : storage{std::make_unique<Storage<T>>(var)}
     {
     }
@@ -46,7 +51,7 @@ struct BoundValue {
         virtual void assign_parsed(std::string_view arg) const = 0;
     };
 
-    template <typename T>
+    template <Streamable T>
     struct Storage : StorageBase {
         explicit Storage(T& var) : var_ptr{&var} {}
 
@@ -63,9 +68,10 @@ struct BoundValue {
 };
 
 struct BoundContainer {
-    template <typename Container>
-    explicit BoundContainer(Container& var)
-        : storage{std::make_unique<Storage<Container>>(var)}
+    template <Streamable T>
+        requires std::default_initializable<T>
+    explicit BoundContainer(std::vector<T>& var)
+        : storage{std::make_unique<Storage<T>>(var)}
     {
     }
 
@@ -83,27 +89,26 @@ struct BoundContainer {
         virtual auto size() const -> std::size_t = 0;
     };
 
-    template <typename Container>
+    template <Streamable T>
+        requires std::default_initializable<T>
     struct Storage : StorageBase {
-        explicit Storage(Container& var) : var_ptr{&var} {}
+        explicit Storage(std::vector<T>& var) : var_ptr{&var} {}
 
         void push_back_parsed(std::string_view arg) const final
         {
-            typename Container::value_type x{};
-            parse(arg, x);
-            var_ptr->push_back(x);
+            parse(arg, var_ptr->emplace_back());
         }
 
         auto size() const -> std::size_t final { return var_ptr->size(); }
 
        private:
-        Container* var_ptr;
+        std::vector<T>* var_ptr;
     };
 
     std::unique_ptr<StorageBase> storage;
 };
 
-template <typename T>
+template <Streamable T>
 inline auto make_bound_variable(T& var) -> BoundValue
 {
     return BoundValue{var};
@@ -114,7 +119,8 @@ inline auto make_bound_variable(bool& var) -> BoundFlag
     return BoundFlag{var};
 }
 
-template <typename T>
+template <Streamable T>
+    requires std::default_initializable<T>
 inline auto make_bound_variable(std::vector<T>& var) -> BoundContainer
 {
     return BoundContainer{var};
@@ -184,7 +190,7 @@ struct Cli {
         int argc,
         char const** argv)  // NOLINT(cppcoreguidelines-avoid-c-arrays)
     {
-        [[maybe_unused]] auto const* name = *argv;
+        program_name = *argv;
         auto unmatched = parse_options({argv + 1, argv + argc});
         parse_positional_arguments(unmatched);
     }
@@ -201,11 +207,12 @@ struct Cli {
         return *it;
     }
 
-    auto parse_options(std::span<char const*> args) -> std::vector<char const**>
+    auto parse_options(std::span<char const*> input)
+        -> std::vector<char const**>
     {
         using namespace detail;
         auto unmatched = std::vector<char const**>{};
-        for (auto it = args.begin(); it < args.end(); ++it) {
+        for (auto it = input.begin(); it < input.end(); ++it) {
             if (std::string_view{*it}.starts_with('-')) {
                 auto& opt = find_option(*it);
                 std::visit(
@@ -213,7 +220,7 @@ struct Cli {
                         [&](BoundFlag& x) { x.set(); },
                         [&](BoundValue& x) {
                             auto value_it = it + 1;
-                            if (value_it >= args.end()) {
+                            if (value_it >= input.end()) {
                                 throw std::runtime_error{"parse"};
                             }
                             x.assign_parsed(*value_it);
@@ -230,34 +237,35 @@ struct Cli {
 
     // TODO assert only one multiarg \
             error handling
-    void parse_positional_arguments(std::span<char const**> args)
+    void parse_positional_arguments(std::span<char const**> input)
     {
         using namespace detail;
-        auto arg_it = args.begin();
+        auto input_it = input.begin();
         for (auto it = positional_args.begin(); it < positional_args.end();
              ++it) {
             std::visit(
                 Overloaded{
                     [&](BoundValue& x) {
-                        x.assign_parsed(**arg_it);
-                        ++arg_it;
+                        x.assign_parsed(**input_it);
+                        ++input_it;
                     },
                     [&](BoundContainer& x) {
                         auto num_rhs_positional_args =
                             positional_args.end() - (it + 1);
-                        auto limit = args.end() - num_rhs_positional_args;
-                        if (arg_it > limit) {
+                        auto limit = input.end() - num_rhs_positional_args;
+                        if (input_it > limit) {
                             throw std::runtime_error{"parse"};
                         }
-                        while (arg_it < limit) {
-                            x.push_back_parsed(**arg_it);
-                            ++arg_it;
+                        while (input_it < limit) {
+                            x.push_back_parsed(**input_it);
+                            ++input_it;
                         }
                     }},
                 it->bound_variable);
-        };
+        }
     }
 
+    std::string program_name;
     std::vector<detail::Option> options;
     std::vector<detail::Argument> positional_args;
 };

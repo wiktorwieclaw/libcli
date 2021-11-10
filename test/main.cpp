@@ -6,7 +6,7 @@
 // TODO: -a -b -c written as -abc or -bac, etc. \
          https://www.gnu.org/software/libc/manual/html_node/Argument-Syntax.html
 
-template <typename T>
+template <libcli::Streamable T>
 auto operator>>(std::istream& stream, std::optional<T>& o) -> std::istream&
 {
     o = T{};
