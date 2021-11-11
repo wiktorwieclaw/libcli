@@ -2,6 +2,7 @@
 #define LIBCLI_CLI_HPP
 
 #include <algorithm>
+#include <cctype>
 #include <concepts>
 #include <memory>
 #include <ranges>
@@ -15,16 +16,27 @@ namespace libcli {
 template <typename T>
 concept streamable = requires(std::istream& is, T& x)
 {
-    {is >> x};
+    {
+        is >> x
+        } -> std::convertible_to<std::istream&>;
 };
-;
+
+;  // bypasses clang-format bug
+
 namespace detail {
 
-inline void parse(std::string_view arg, streamable auto& result)
+inline void parse(std::string_view input, streamable auto& result)
 {
     auto ss = std::stringstream{};
-    ss << arg;
+    ss << input;
     ss >> result;
+}
+
+inline void parse(std::string_view input, std::string& result)
+{
+    auto ss = std::stringstream{};
+    ss << input;
+    result = ss.str();
 }
 
 struct bound_flag {
@@ -110,8 +122,7 @@ struct bound_container {
     std::unique_ptr<storage_base> storage_ptr;
 };
 
-template <streamable T>
-inline auto make_bound_variable(T& var) -> bound_value
+inline auto make_bound_variable(streamable auto& var) -> bound_value
 {
     return bound_value{var};
 }
@@ -140,8 +151,7 @@ namespace detail {
 struct option {
     using bound_variable = std::variant<bound_flag, bound_value>;
 
-    template <typename T>
-    option(std::string long_name, std::string short_name, T& var)
+    option(std::string long_name, std::string short_name, auto& var)
         : info{std::move(long_name), std::move(short_name)},
           var{make_bound_variable(var)}
     {
@@ -154,10 +164,7 @@ struct option {
 struct argument {
     using bound_variable = std::variant<bound_value, bound_container>;
 
-    template <typename T>
-    explicit argument(T& var) : var{make_bound_variable(var)}
-    {
-    }
+    explicit argument(auto& var) : var{make_bound_variable(var)} {}
 
     bound_variable var;
 };
@@ -170,53 +177,91 @@ struct overloaded : Ts... {
 template <typename... Ts>
 overloaded(Ts...) -> overloaded<Ts...>;
 
+struct invalid_cli_specification : public std::invalid_argument {
+    using invalid_argument::invalid_argument;
+};
+
+inline void verify_option_name(std::string_view name)
+{
+    if (name.size() < 3 || name.substr(0, 2) != "--") {
+        throw invalid_cli_specification{
+            "Option name has to start with -- and at least one character"};
+    }
+    for (auto const c : name.substr(2)) {
+        if (std::isalnum(c) == 0 && c != '-') {
+            throw invalid_cli_specification{
+                "Option name has to be composed with alphanumeric "
+                "characters or dashes"};
+        }
+    }
+}
+
+inline void verify_option_shorthand(std::string_view shorthand)
+{
+    if (shorthand.size() != 2 || shorthand[0] != '-') {
+        throw invalid_cli_specification{
+            "Option shorthand has to start with - and one character"};
+    }
+    if (std::isalpha(shorthand[1]) == 0) {
+        throw invalid_cli_specification{
+            "Option shorthand has to be alphabetic"};
+    }
+}
+
+inline void verify_option_specification(
+    std::string_view name,
+    std::string_view shorthand)
+{
+    verify_option_name(name);
+    verify_option_shorthand(shorthand);
+}
+
 }  // namespace detail
 
 struct cli {
    public:
-    template <typename T>
-    auto add_option(T& var, std::string long_name, std::string short_name = "")
+    auto add_option(auto& var, std::string name, std::string shorthand = "")
         -> option_info const&
     {
-        options.emplace_back(std::move(long_name), std::move(short_name), var);
+        detail::verify_option_specification(name, shorthand);
+        options.emplace_back(std::move(name), std::move(shorthand), var);
         return options.back().info;
     }
 
-    template <typename T>
-    void add_argument(T& var)
-    {
-        positional_args.emplace_back(var);
-    }
+    void add_argument(auto& var) { positional_args.emplace_back(var); }
 
     void parse(
         int argc,
-        char const** argv)  // NOLINT(cppcoreguidelines-avoid-c-arrays)
+        char const* const* argv)  // NOLINT(cppcoreguidelines-avoid-c-arrays)
     {
+        if (argc <= 0) {
+            throw std::runtime_error{"parse"};
+        }
         program_name = *argv;
         auto unmatched = parse_options({argv + 1, argv + argc});
         parse_positional_arguments(unmatched);
     }
 
    private:
-    auto find_option(std::string_view option) -> detail::option&
+    auto match(std::string_view option) -> detail::option&
     {
         auto it = std::ranges::find_if(options, [&](auto& o) {
             return o.info.short_name == option || o.info.long_name == option;
         });
         if (it == options.end()) {
-            throw std::runtime_error{"find_option"};
+            throw std::runtime_error{"match"};
         }
         return *it;
     }
 
-    auto parse_options(std::span<char const*> input)
-        -> std::vector<char const**>
+    auto parse_options(std::span<char const* const> input)
+        -> std::vector<char const* const*>
     {
         using namespace detail;
-        auto unmatched = std::vector<char const**>{};
+        auto unmatched = std::vector<char const* const*>{};
         for (auto it = input.begin(); it < input.end(); ++it) {
             if (std::string_view{*it}.starts_with('-')) {
-                auto& opt = find_option(*it);
+                auto& opt = match(*it);
                 std::visit(
                     overloaded{
                         [&](bound_flag& x) { x.set(); },
@@ -239,12 +284,16 @@ struct cli {
 
     // TODO assert only one multiarg \
             error handling
-    void parse_positional_arguments(std::span<char const**> input)
+    void parse_positional_arguments(std::span<char const* const*> input)
     {
         using namespace detail;
         auto input_it = input.begin();
         for (auto it = positional_args.begin(); it < positional_args.end();
              ++it) {
+            if (input_it == input.end()) {
+                throw std::runtime_error("parse_positional_arguments");
+            }
+
             std::visit(
                 overloaded{
                     [&](bound_value& x) {
