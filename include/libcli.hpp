@@ -13,15 +13,12 @@
 
 namespace libcli {
 
+// clang-format off
 template <typename T>
-concept streamable = requires(std::istream& is, T& x)
-{
-    {
-        is >> x
-        } -> std::convertible_to<std::istream&>;
-};
-
-;  // bypasses clang-format bug
+concept streamable = requires(std::istream& is, T& x) {
+    { is >> x } -> std::convertible_to<std::istream&>;
+};;
+// clang-format on
 
 namespace detail {
 
@@ -39,16 +36,37 @@ inline void parse(std::string_view input, std::string& result)
     result = ss.str();
 }
 
+inline void parse(std::string_view input, bool& result)
+{
+    if (input == "1" || input == "true") {
+        result = true;
+    }
+    else if (input == "0" || input == "false") {
+        result = false;
+    }
+    else {
+        throw std::runtime_error{"parse bool"};
+    }
+}
+
+template <std::default_initializable T>
+inline void parse(std::string_view input, std::optional<T>& o)
+{
+    o = T{};
+    parse(input, *o);
+}
+
 struct bound_flag {
     explicit bound_flag(bool& var) : var_ptr{&var} {}
-    void set() const { *var_ptr = true; }
+    void assign_parsed(std::string_view input) const { parse(input, *var_ptr); }
+    void assign(bool x) { *var_ptr = x; }
 
    private:
     bool* var_ptr;
 };
 
 struct bound_value {
-    template <streamable T>
+    template <typename T>
     explicit bound_value(T& var)
         : storage_ptr{std::make_unique<storage<T>>(var)}
     {
@@ -65,7 +83,7 @@ struct bound_value {
         virtual void assign_parsed(std::string_view arg) const = 0;
     };
 
-    template <streamable T>
+    template <typename T>
     struct storage : storage_base {
         explicit storage(T& var) : var_ptr{&var} {}
 
@@ -82,8 +100,7 @@ struct bound_value {
 };
 
 struct bound_container {
-    template <streamable T>
-        requires std::default_initializable<T>
+    template <typename T>
     explicit bound_container(std::vector<T>& var)
         : storage_ptr{std::make_unique<storage<T>>(var)}
     {
@@ -103,8 +120,7 @@ struct bound_container {
         virtual auto size() const -> std::size_t = 0;
     };
 
-    template <streamable T>
-        requires std::default_initializable<T>
+    template <typename T>
     struct storage : storage_base {
         explicit storage(std::vector<T>& var) : var_ptr{&var} {}
 
@@ -122,7 +138,7 @@ struct bound_container {
     std::unique_ptr<storage_base> storage_ptr;
 };
 
-inline auto make_bound_variable(streamable auto& var) -> bound_value
+inline auto make_bound_variable(auto& var) -> bound_value
 {
     return bound_value{var};
 }
@@ -153,20 +169,20 @@ struct option {
 
     option(std::string long_name, std::string short_name, auto& var)
         : info{std::move(long_name), std::move(short_name)},
-          var{make_bound_variable(var)}
+          bound_var{make_bound_variable(var)}
     {
     }
 
     option_info info;
-    bound_variable var;
+    bound_variable bound_var;
 };
 
 struct argument {
     using bound_variable = std::variant<bound_value, bound_container>;
 
-    explicit argument(auto& var) : var{make_bound_variable(var)} {}
+    explicit argument(auto& var) : bound_var{make_bound_variable(var)} {}
 
-    bound_variable var;
+    bound_variable bound_var;
 };
 
 template <typename... Ts>
@@ -242,11 +258,17 @@ struct cli {
         parse_positional_arguments(unmatched);
     }
 
+    void parse(std::initializer_list<char const*>
+                   input)  // NOLINT(cppcoreguidelines-avoid-c-arrays)
+    {
+        parse(input.size(), data(input));
+    }
+
    private:
-    auto match(std::string_view option) -> detail::option&
+    auto match_option(std::string_view input) -> detail::option&
     {
         auto it = std::ranges::find_if(options, [&](auto& o) {
-            return o.info.short_name == option || o.info.long_name == option;
+            return o.info.short_name == input || o.info.long_name == input;
         });
         if (it == options.end()) {
             throw std::runtime_error{"match"};
@@ -260,20 +282,32 @@ struct cli {
         using namespace detail;
         auto unmatched = std::vector<char const* const*>{};
         for (auto it = input.begin(); it < input.end(); ++it) {
-            if (std::string_view{*it}.starts_with('-')) {
-                auto& opt = match(*it);
-                std::visit(
-                    overloaded{
-                        [&](bound_flag& x) { x.set(); },
-                        [&](bound_value& x) {
-                            auto value_it = it + 1;
-                            if (value_it >= input.end()) {
-                                throw std::runtime_error{"parse"};
-                            }
-                            x.assign_parsed(*value_it);
-                            ++it;
-                        }},
-                    opt.var);
+            auto const str = std::string_view{*it};
+            if (str.starts_with('-')) {
+                if (auto const pos = str.find('=');
+                    pos != std::string_view::npos) {
+                    auto const lhs = str.substr(0, pos);
+                    auto const rhs = str.substr(pos + 1);
+                    auto& opt = match_option(lhs);
+                    std::visit(
+                        [=](auto& x) { x.assign_parsed(rhs); },
+                        opt.bound_var);
+                }
+                else {
+                    auto& opt = match_option(str);
+                    std::visit(
+                        overloaded{
+                            [&](bound_flag& x) { x.assign(true); },
+                            [&](bound_value& x) {
+                                auto value_it = it + 1;
+                                if (value_it >= input.end()) {
+                                    throw std::runtime_error{"parse"};
+                                }
+                                x.assign_parsed(*value_it);
+                                ++it;
+                            }},
+                        opt.bound_var);
+                }
             }
             else {
                 unmatched.push_back(&*it);
@@ -312,7 +346,7 @@ struct cli {
                             ++input_it;
                         }
                     }},
-                it->var);
+                it->bound_var);
         }
     }
 

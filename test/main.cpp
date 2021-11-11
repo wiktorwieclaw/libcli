@@ -8,47 +8,81 @@
 
 using namespace std::string_literals;
 
-template <libcli::streamable T>
-    requires std::default_initializable<T>
-auto operator>>(std::istream& stream, std::optional<T>& o) -> std::istream&
-{
-    o = T{};
-    stream >> *o;
-    return stream;
-}
-
 TEST_CASE("empty argument list")
 {
-    auto const input = std::array<char const*, 0>{};
-
     auto cli = libcli::cli{};
-    REQUIRE_THROWS(cli.parse(input.size(), input.data())); // TODO THROWS_AS
+    REQUIRE_THROWS(cli.parse({}));  // TODO THROWS_AS
 }
 
 TEST_CASE("missing positional argument")
 {
-    auto const input = std::array{"program"};
     auto arg1 = ""s;
-
     auto cli = libcli::cli{};
     cli.add_argument(arg1);
-    REQUIRE_THROWS(cli.parse(input.size(), input.data())); // TODO THROWS_AS
+    REQUIRE_THROWS(cli.parse({"app_name"}));  // TODO THROWS_AS
 }
 
 TEST_CASE("unknown option")
 {
+    auto cli = libcli::cli{};
     SECTION("by name")
     {
-        auto const input = std::array{"program", "--unspecified"};
-        auto cli = libcli::cli{};
-        REQUIRE_THROWS(cli.parse(input.size(), input.data())); // TODO THROWS_AS
+        REQUIRE_THROWS(
+            cli.parse({"app_name", "--unspecified"}));  // TODO THROWS_AS
     }
 
     SECTION("by shorthand")
     {
-        auto const input = std::array{"program", "-u"};
-        auto cli = libcli::cli{};
-        REQUIRE_THROWS(cli.parse(input.size(), input.data())); // TODO THROWS_AS
+        REQUIRE_THROWS(cli.parse({"app_name", "-u"}));  // TODO THROWS_AS
+    }
+}
+
+TEST_CASE("parse flag")
+{
+    auto flag = false;
+    auto cli = libcli::cli{};
+    cli.add_option(flag, "--flag", "-f");
+
+    SECTION("--flag")
+    {
+        flag = false;
+        cli.parse({"app_name", "--flag"});
+        REQUIRE(flag == true);
+    }
+
+    SECTION("--flag unrelated")
+    {
+        flag = false;
+        cli.parse({"app_name", "--flag", "unrelated"});
+        REQUIRE(flag == true);
+    }
+
+    SECTION("--flag=true")
+    {
+        flag = false;
+        cli.parse({"app_name", "--flag=true"});
+        REQUIRE(flag == true);
+    }
+
+    SECTION("--flag=1")
+    {
+        flag = false;
+        cli.parse({"app_name", "--flag=1"});
+        REQUIRE(flag == true);
+    }
+
+    SECTION("--flag=false")
+    {
+        flag = false;
+        cli.parse({"app_name", "--flag=false"});
+        REQUIRE(flag == false);
+    }
+
+    SECTION("--flag=0")
+    {
+        flag = false;
+        cli.parse({"app_name", "--flag=0"});
+        REQUIRE(flag == false);
     }
 }
 
