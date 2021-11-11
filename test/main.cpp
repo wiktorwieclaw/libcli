@@ -84,6 +84,13 @@ TEST_CASE("parse flag")
         cli.parse({"app_name", "--flag=0"});
         REQUIRE(flag == false);
     }
+
+    SECTION("--flag=2")
+    {
+        REQUIRE_THROWS_AS(
+            cli.parse({"app_name", "--flag=2"}),
+            libcli::invalid_flag_value);
+    }
 }
 
 TEST_CASE("main test")

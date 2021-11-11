@@ -36,6 +36,10 @@ inline void parse(std::string_view input, std::string& result)
     result = ss.str();
 }
 
+struct invalid_flag_value : public std::invalid_argument {
+    invalid_flag_value() : invalid_argument{"Invalid flag value"} {}
+};
+
 inline void parse(std::string_view input, bool& result)
 {
     if (input == "1" || input == "true") {
@@ -45,7 +49,7 @@ inline void parse(std::string_view input, bool& result)
         result = false;
     }
     else {
-        throw std::runtime_error{"parse bool"};
+        throw invalid_flag_value{};
     }
 }
 
@@ -354,6 +358,8 @@ struct cli {
     std::vector<detail::option> options;
     std::vector<detail::argument> positional_args;
 };
+
+using detail::invalid_flag_value;
 
 }  // namespace libcli
 
