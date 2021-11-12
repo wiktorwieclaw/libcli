@@ -23,13 +23,6 @@ struct overloaded : Ts... {
 template <typename... Ts>
 overloaded(Ts...) -> overloaded<Ts...>;
 
-// clang-format off
-template <typename T>
-concept streamable = requires(std::istream& is, T& x) {
-    { is >> x } -> std::convertible_to<std::istream&>;
-};
-// clang-format on
-
 struct invalid_cli_specification : public std::invalid_argument {
     using invalid_argument::invalid_argument;
 };
@@ -38,7 +31,14 @@ struct invalid_input : public std::runtime_error {
     using runtime_error::runtime_error;
 };
 
-inline void parse(std::string_view input, streamable auto& result)
+// clang-format off
+template <typename T>
+concept input_streamable = requires(std::istream& is, T& x) {
+    { is >> x } -> std::convertible_to<std::istream&>;
+};
+// clang-format on
+
+inline void parse(std::string_view input, input_streamable auto& result)
 {
     auto ss = std::stringstream{};
     ss << input;
@@ -71,6 +71,13 @@ inline void parse(std::string_view input, std::optional<T>& o)
     o = T{};
     parse(input, *o);
 }
+
+// clang-format off
+template <typename T>
+concept parsable = requires(std::string_view str, T& out) {
+    { parse(str, out) } -> std::same_as<void>;
+};
+// clang-format on
 
 struct bound_flag {
     explicit bound_flag(bool& var) : var_ptr{&var} {}
@@ -116,7 +123,7 @@ struct bound_value {
 };
 
 struct bound_container {
-    template <typename T>
+    template <parsable T>
     explicit bound_container(std::vector<T>& var)
         : storage_ptr{std::make_unique<storage<T>>(var)}
     {
@@ -136,7 +143,7 @@ struct bound_container {
         virtual auto size() const -> std::size_t = 0;
     };
 
-    template <typename T>
+    template <parsable T>
     struct storage : storage_base {
         explicit storage(std::vector<T>& var) : var_ptr{&var} {}
 
@@ -164,7 +171,7 @@ inline auto make_bound_variable(bool& var) -> bound_flag
     return bound_flag{var};
 }
 
-template <typename T>
+template <parsable T>
 inline auto make_bound_variable(std::vector<T>& var) -> bound_container
 {
     return bound_container{var};
@@ -257,7 +264,7 @@ struct cli {
 
     void parse(std::initializer_list<char const*> input)
     {
-        parse(static_cast<int>(put.size()), data(input));
+        parse(static_cast<int>(input.size()), data(input));
     }
 
    private:
