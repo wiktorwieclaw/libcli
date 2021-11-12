@@ -7,20 +7,36 @@
 #include <memory>
 #include <ranges>
 #include <span>
+#include <sstream>
 #include <string>
 #include <variant>
 #include <vector>
 
 namespace libcli {
+namespace detail {
+
+template <typename... Ts>
+struct overloaded : Ts... {
+    using Ts::operator()...;
+};
+
+template <typename... Ts>
+overloaded(Ts...) -> overloaded<Ts...>;
 
 // clang-format off
 template <typename T>
 concept streamable = requires(std::istream& is, T& x) {
     { is >> x } -> std::convertible_to<std::istream&>;
-};;
+};
 // clang-format on
 
-namespace detail {
+struct invalid_cli_specification : public std::invalid_argument {
+    using invalid_argument::invalid_argument;
+};
+
+struct invalid_input : public std::runtime_error {
+    using runtime_error::runtime_error;
+};
 
 inline void parse(std::string_view input, streamable auto& result)
 {
@@ -36,10 +52,6 @@ inline void parse(std::string_view input, std::string& result)
     result = ss.str();
 }
 
-struct invalid_flag_value : public std::invalid_argument {
-    invalid_flag_value() : invalid_argument{"Invalid flag value"} {}
-};
-
 inline void parse(std::string_view input, bool& result)
 {
     if (input == "1" || input == "true") {
@@ -49,7 +61,7 @@ inline void parse(std::string_view input, bool& result)
         result = false;
     }
     else {
-        throw invalid_flag_value{};
+        throw invalid_input{"Invalid flag value"};
     }
 }
 
@@ -159,14 +171,10 @@ inline auto make_bound_variable(std::vector<T>& var) -> bound_container
     return bound_container{var};
 }
 
-}  // namespace detail
-
 struct option_info {
     std::string long_name;
     std::string short_name;
 };
-
-namespace detail {
 
 struct option {
     using bound_variable = std::variant<bound_flag, bound_value>;
@@ -187,18 +195,6 @@ struct argument {
     explicit argument(auto& var) : bound_var{make_bound_variable(var)} {}
 
     bound_variable bound_var;
-};
-
-template <typename... Ts>
-struct overloaded : Ts... {
-    using Ts::operator()...;
-};
-
-template <typename... Ts>
-overloaded(Ts...) -> overloaded<Ts...>;
-
-struct invalid_cli_specification : public std::invalid_argument {
-    using invalid_argument::invalid_argument;
 };
 
 inline void verify_option_name(std::string_view name)
@@ -236,14 +232,12 @@ inline void verify_option_specification(
     verify_option_shorthand(shorthand);
 }
 
-}  // namespace detail
-
 struct cli {
    public:
     auto add_option(auto& var, std::string name, std::string shorthand = "")
         -> option_info const&
     {
-        detail::verify_option_specification(name, shorthand);
+        verify_option_specification(name, shorthand);
         options.emplace_back(std::move(name), std::move(shorthand), var);
         return options.back().info;
     }
@@ -269,13 +263,13 @@ struct cli {
     }
 
    private:
-    auto match_option(std::string_view input) -> detail::option&
+    auto match_option(std::string_view input) -> option&
     {
         auto it = std::ranges::find_if(options, [&](auto& o) {
             return o.info.short_name == input || o.info.long_name == input;
         });
         if (it == options.end()) {
-            throw std::runtime_error{"match"};
+            throw invalid_input{"Invalid option"};
         }
         return *it;
     }
@@ -283,7 +277,6 @@ struct cli {
     auto parse_options(std::span<char const* const> input)
         -> std::vector<char const* const*>
     {
-        using namespace detail;
         auto unmatched = std::vector<char const* const*>{};
         for (auto it = input.begin(); it < input.end(); ++it) {
             auto const str = std::string_view{*it};
@@ -324,12 +317,11 @@ struct cli {
             error handling
     void parse_positional_arguments(std::span<char const* const*> input)
     {
-        using namespace detail;
         auto input_it = input.begin();
         for (auto it = positional_args.begin(); it < positional_args.end();
              ++it) {
             if (input_it == input.end()) {
-                throw std::runtime_error("parse_positional_arguments");
+                throw invalid_input("Wrong number of arguments");
             }
 
             std::visit(
@@ -355,11 +347,14 @@ struct cli {
     }
 
     std::string program_name;
-    std::vector<detail::option> options;
-    std::vector<detail::argument> positional_args;
+    std::vector<option> options;
+    std::vector<argument> positional_args;
 };
+}  // namespace detail
 
-using detail::invalid_flag_value;
+using detail::cli;
+using detail::invalid_cli_specification;
+using detail::invalid_input;
 
 }  // namespace libcli
 

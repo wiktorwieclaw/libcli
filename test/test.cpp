@@ -1,6 +1,4 @@
 #include <catch2/catch_test_macros.hpp>
-#include <complex>
-#include <iostream>
 #include <libcli.hpp>
 
 // TODO: -a -b -c written as -abc or -bac, etc. \
@@ -19,7 +17,7 @@ TEST_CASE("missing positional argument")
     auto arg1 = ""s;
     auto cli = libcli::cli{};
     cli.add_argument(arg1);
-    REQUIRE_THROWS(cli.parse({"app_name"}));  // TODO THROWS_AS
+    REQUIRE_THROWS_AS(cli.parse({"app_name"}), libcli::invalid_input);
 }
 
 TEST_CASE("unknown option")
@@ -27,13 +25,14 @@ TEST_CASE("unknown option")
     auto cli = libcli::cli{};
     SECTION("by name")
     {
-        REQUIRE_THROWS(
-            cli.parse({"app_name", "--unspecified"}));  // TODO THROWS_AS
+        REQUIRE_THROWS_AS(
+            cli.parse({"app_name", "--unspecified"}),
+            libcli::invalid_input);
     }
 
     SECTION("by shorthand")
     {
-        REQUIRE_THROWS(cli.parse({"app_name", "-u"}));  // TODO THROWS_AS
+        REQUIRE_THROWS_AS(cli.parse({"app_name", "-u"}), libcli::invalid_input);
     }
 }
 
@@ -89,7 +88,7 @@ TEST_CASE("parse flag")
     {
         REQUIRE_THROWS_AS(
             cli.parse({"app_name", "--flag=2"}),
-            libcli::invalid_flag_value);
+            libcli::invalid_input);
     }
 }
 

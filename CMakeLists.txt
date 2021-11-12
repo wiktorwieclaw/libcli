@@ -16,5 +16,5 @@ FetchContent_MakeAvailable(Catch2)
 add_library(${PROJECT_NAME} INTERFACE)
 target_include_directories(${PROJECT_NAME} INTERFACE include/)
 
-add_executable(test test/main.cpp)
+add_executable(test test/test.cpp)
 target_link_libraries(test PRIVATE ${PROJECT_NAME} Catch2::Catch2WithMain)
