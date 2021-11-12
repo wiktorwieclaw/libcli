@@ -88,24 +88,24 @@ struct bound_value {
     {
     }
 
-    void assign_parsed(std::string_view arg) const
+    void assign_parsed(std::string_view input) const
     {
-        storage_ptr->assign_parsed(arg);
+        storage_ptr->assign_parsed(input);
     }
 
    private:
     struct storage_base {  // NOLINT(cppcoreguidelines-special-member-functions)
         virtual ~storage_base() = default;
-        virtual void assign_parsed(std::string_view arg) const = 0;
+        virtual void assign_parsed(std::string_view input) const = 0;
     };
 
     template <typename T>
     struct storage : storage_base {
         explicit storage(T& var) : var_ptr{&var} {}
 
-        void assign_parsed(std::string_view arg) const final
+        void assign_parsed(std::string_view input) const final
         {
-            parse(arg, *var_ptr);
+            parse(input, *var_ptr);
         }
 
        private:
@@ -122,9 +122,9 @@ struct bound_container {
     {
     }
 
-    void push_back_parsed(std::string_view args) const
+    void push_back_parsed(std::string_view input) const
     {
-        storage_ptr->push_back_parsed(args);
+        storage_ptr->push_back_parsed(input);
     }
 
     auto size() const -> std::size_t const { return storage_ptr->size(); }
@@ -132,7 +132,7 @@ struct bound_container {
    private:
     struct storage_base {  // NOLINT(cppcoreguidelines-special-member-functions)
         virtual ~storage_base() = default;
-        virtual void push_back_parsed(std::string_view arg) const = 0;
+        virtual void push_back_parsed(std::string_view input) const = 0;
         virtual auto size() const -> std::size_t = 0;
     };
 
@@ -140,9 +140,9 @@ struct bound_container {
     struct storage : storage_base {
         explicit storage(std::vector<T>& var) : var_ptr{&var} {}
 
-        void push_back_parsed(std::string_view arg) const final
+        void push_back_parsed(std::string_view input) const final
         {
-            parse(arg, var_ptr->emplace_back());
+            parse(input, var_ptr->emplace_back());
         }
 
         auto size() const -> std::size_t final { return var_ptr->size(); }
@@ -164,8 +164,7 @@ inline auto make_bound_variable(bool& var) -> bound_flag
     return bound_flag{var};
 }
 
-template <streamable T>
-    requires std::default_initializable<T>
+template <typename T>
 inline auto make_bound_variable(std::vector<T>& var) -> bound_container
 {
     return bound_container{var};
@@ -249,17 +248,16 @@ struct cli {
         char const* const* argv)  // NOLINT(cppcoreguidelines-avoid-c-arrays)
     {
         if (argc <= 0) {
-            throw std::runtime_error{"parse"};
+            throw std::logic_error{"Input cannot be empty"};
         }
         program_name = *argv;
         auto unmatched = parse_options({argv + 1, argv + argc});
         parse_positional_arguments(unmatched);
     }
 
-    void parse(std::initializer_list<char const*>
-                   input)  // NOLINT(cppcoreguidelines-avoid-c-arrays)
+    void parse(std::initializer_list<char const*> input)
     {
-        parse(input.size(), data(input));
+        parse(static_cast<int>(put.size()), data(input));
     }
 
    private:
@@ -298,7 +296,7 @@ struct cli {
                             [&](bound_value& x) {
                                 auto value_it = it + 1;
                                 if (value_it >= input.end()) {
-                                    throw std::runtime_error{"parse"};
+                                    throw invalid_input{"Missing option value"};
                                 }
                                 x.assign_parsed(*value_it);
                                 ++it;
@@ -313,8 +311,7 @@ struct cli {
         return unmatched;
     }
 
-    // TODO assert only one multiarg \
-            error handling
+    // TODO assert only one multiarg
     void parse_positional_arguments(std::span<char const* const*> input)
     {
         auto input_it = input.begin();
@@ -323,7 +320,6 @@ struct cli {
             if (input_it == input.end()) {
                 throw invalid_input("Wrong number of arguments");
             }
-
             std::visit(
                 overloaded{
                     [&](bound_value& x) {
@@ -335,7 +331,7 @@ struct cli {
                             positional_args.end() - (it + 1);
                         auto limit = input.end() - num_rhs_positional_args;
                         if (input_it > limit) {
-                            throw std::runtime_error{"parse"};
+                            throw invalid_input{"Wrong number of arguments"};
                         }
                         while (input_it < limit) {
                             x.push_back_parsed(**input_it);

@@ -9,7 +9,7 @@ using namespace std::string_literals;
 TEST_CASE("empty argument list")
 {
     auto cli = libcli::cli{};
-    REQUIRE_THROWS(cli.parse({}));  // TODO THROWS_AS
+    REQUIRE_THROWS_AS(cli.parse({}), std::logic_error);
 }
 
 TEST_CASE("missing positional argument")
