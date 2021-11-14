@@ -1,8 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <libcli.hpp>
 
-// TODO: -a -b -c written as -abc or -bac, etc. \
-         https://www.gnu.org/software/libc/manual/html_node/Argument-Syntax.html
+// TODO: https://www.gnu.org/software/libc/manual/html_node/Argument-Syntax.html
 
 using namespace std::string_literals;
 
@@ -56,40 +55,72 @@ TEST_CASE("parse flag")
         REQUIRE(flag == true);
     }
 
-    SECTION("--flag=true")
-    {
-        flag = false;
-        cli.parse({"app_name", "--flag=true"});
-        REQUIRE(flag == true);
-    }
-
     SECTION("--flag=1")
     {
-        flag = false;
-        cli.parse({"app_name", "--flag=1"});
-        REQUIRE(flag == true);
-    }
-
-    SECTION("--flag=false")
-    {
-        flag = false;
-        cli.parse({"app_name", "--flag=false"});
-        REQUIRE(flag == false);
-    }
-
-    SECTION("--flag=0")
-    {
-        flag = false;
-        cli.parse({"app_name", "--flag=0"});
-        REQUIRE(flag == false);
-    }
-
-    SECTION("--flag=2")
-    {
         REQUIRE_THROWS_AS(
-            cli.parse({"app_name", "--flag=2"}),
+            cli.parse({"app_name", "--flag=1"}),
             libcli::invalid_input);
     }
+}
+
+TEST_CASE("-- separator")
+{
+    auto option = false;
+    auto arg = ""s;
+
+    auto cli = libcli::cli{};
+    cli.add_option(option, "--option", "-o");
+    cli.add_argument(arg);
+
+    SECTION("-o arg --")
+    {
+        cli.parse({"app_name", "-o", "arg", "--"});
+        REQUIRE(option == true);
+        REQUIRE(arg == "arg");
+    }
+
+    SECTION("-o -- -arg")
+    {
+        option = false;
+        arg.clear();
+
+        cli.parse({"app_name", "-o", "--", "-arg"});
+        REQUIRE(option == true);
+        REQUIRE(arg == "-arg");
+    }
+}
+
+TEST_CASE("multi-argument")
+{
+    SECTION("more than one")
+    {
+        auto multi_arg_1 = std::vector<std::string>{};
+        auto multi_arg_2 = std::vector<int>{};
+
+        auto cli = libcli::cli{};
+        cli.add_argument(multi_arg_1);
+        REQUIRE_THROWS_AS(
+            cli.add_argument(multi_arg_2),
+            libcli::invalid_cli_specification);
+    }
+
+    // TODO
+}
+
+TEST_CASE("connected flags")
+{
+    auto a = false;
+    auto b = false;
+
+    auto cli = libcli::cli{};
+    cli.add_option(a, "--a", "-a");
+    cli.add_option(b, "--b", "-b");
+    cli.parse({"app_name", "-ab"});
+
+    REQUIRE(a == true);
+    REQUIRE(b == true);
+
+    // TODO add case where one of the joined options is not a flag
 }
 
 TEST_CASE("main test")
@@ -98,8 +129,7 @@ TEST_CASE("main test")
         "test",
         "--label",
         "coords",
-        "--number",
-        "123",
+        "--number=123",
         "first positional",
         "-p",
         "second positional",

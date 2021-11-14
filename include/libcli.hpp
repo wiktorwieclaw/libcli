@@ -9,11 +9,14 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
 namespace libcli {
 namespace detail {
+
+using namespace std::string_literals;
 
 template <typename... Ts>
 struct overloaded : Ts... {
@@ -52,19 +55,6 @@ inline void parse(std::string_view input, std::string& result)
     result = ss.str();
 }
 
-inline void parse(std::string_view input, bool& result)
-{
-    if (input == "1" || input == "true") {
-        result = true;
-    }
-    else if (input == "0" || input == "false") {
-        result = false;
-    }
-    else {
-        throw invalid_input{"Invalid flag value"};
-    }
-}
-
 template <std::default_initializable T>
 inline void parse(std::string_view input, std::optional<T>& o)
 {
@@ -81,7 +71,6 @@ concept parsable = requires(std::string_view str, T& out) {
 
 struct bound_flag {
     explicit bound_flag(bool& var) : var_ptr{&var} {}
-    void assign_parsed(std::string_view input) const { parse(input, *var_ptr); }
     void assign(bool x) { *var_ptr = x; }
 
    private:
@@ -238,17 +227,73 @@ inline void verify_option_specification(
     verify_option_shorthand(shorthand);
 }
 
+enum class token_kind { opt, arg, opt_val };
+
+struct token {
+    token_kind kind;
+    std::string str;
+
+    token(token_kind kind, std::string_view str) : kind{kind}, str{str} {}
+};
+
+auto tokenize(std::span<char const* const> input) -> std::vector<token>
+{
+    auto tokens = std::vector<token>{};
+    for (auto it = begin(input); it < end(input); ++it) {
+        auto const str = std::string_view{*it};
+        if (str == "--") {
+            std::transform(
+                it + 1,
+                end(input),
+                back_inserter(tokens),
+                [](auto const& str) {
+                    return token{token_kind::arg, str};
+                });
+            break;
+        }
+        if (str.starts_with('-')) {
+            if (str[1] != '-' && str.length() > 2) {
+                for (auto const c : str.substr(1)) {
+                    tokens.emplace_back(token_kind::opt, "-"s + c);
+                }
+            }
+            else if (auto const pos = str.find('=');
+                     pos != std::string_view::npos) {
+                tokens.emplace_back(token_kind::opt_val, str.substr(0, pos));
+                tokens.emplace_back(token_kind::arg, str.substr(pos + 1));
+            }
+            else {
+                tokens.emplace_back(token_kind::opt, str);
+            }
+        }
+        else {
+            tokens.emplace_back(token_kind::arg, str);
+        }
+    }
+    return tokens;
+}
+
 struct cli {
    public:
     auto add_option(auto& var, std::string name, std::string shorthand = "")
         -> option_info const&
     {
-        verify_option_specification(name, shorthand);
+        verify_option_specification(name, shorthand);  // TODO move to parsing
         options.emplace_back(std::move(name), std::move(shorthand), var);
         return options.back().info;
     }
 
-    void add_argument(auto& var) { positional_args.emplace_back(var); }
+    void add_argument(auto& var)
+    {
+        auto const& ref = positional_args.emplace_back(var);
+        if (std::holds_alternative<bound_container>(ref.bound_var)) {
+            if (has_multi_argument) {
+                throw invalid_cli_specification{
+                    "There cannot be more than one multi-argument"};
+            }
+            has_multi_argument = true;
+        }
+    }
 
     void parse(
         int argc,
@@ -257,8 +302,9 @@ struct cli {
         if (argc <= 0) {
             throw std::logic_error{"Input cannot be empty"};
         }
-        program_name = *argv;
-        auto unmatched = parse_options({argv + 1, argv + argc});
+        program_name = argv[0];
+        auto const tokens = tokenize({argv + 1, argv + argc});
+        auto unmatched = parse_options(tokens);
         parse_positional_arguments(unmatched);
     }
 
@@ -279,47 +325,39 @@ struct cli {
         return *it;
     }
 
-    auto parse_options(std::span<char const* const> input)
-        -> std::vector<char const* const*>
+    auto parse_options(std::span<token const> tokens)
+        -> std::vector<token const*>
     {
-        auto unmatched = std::vector<char const* const*>{};
-        for (auto it = input.begin(); it < input.end(); ++it) {
-            auto const str = std::string_view{*it};
-            if (str.starts_with('-')) {
-                if (auto const pos = str.find('=');
-                    pos != std::string_view::npos) {
-                    auto const lhs = str.substr(0, pos);
-                    auto const rhs = str.substr(pos + 1);
-                    auto& opt = match_option(lhs);
-                    std::visit(
-                        [=](auto& x) { x.assign_parsed(rhs); },
-                        opt.bound_var);
-                }
-                else {
-                    auto& opt = match_option(str);
-                    std::visit(
-                        overloaded{
-                            [&](bound_flag& x) { x.assign(true); },
-                            [&](bound_value& x) {
-                                auto value_it = it + 1;
-                                if (value_it >= input.end()) {
-                                    throw invalid_input{"Missing option value"};
-                                }
-                                x.assign_parsed(*value_it);
-                                ++it;
-                            }},
-                        opt.bound_var);
-                }
+        auto unmatched = std::vector<token const*>{};
+        for (auto it = tokens.begin(); it < tokens.end(); ++it) {
+            auto const& token = *it;
+            if (token.kind == token_kind::arg) {
+                unmatched.push_back(&token);
             }
             else {
-                unmatched.push_back(&*it);
+                auto& opt = match_option(token.str);
+                auto visitor = overloaded{
+                    [&](bound_flag& bf) {
+                        if (token.kind == token_kind::opt_val) {
+                            throw invalid_input{
+                                "Cannot use \"=\" notation with flags"};
+                        }
+                        bf.assign(true);
+                    },
+                    [&](bound_value& bv) {
+                        ++it;
+                        if (it >= tokens.end()) {
+                            throw invalid_input{"Missing option value"};
+                        }
+                        bv.assign_parsed(it->str);
+                    }};
+                std::visit(visitor, opt.bound_var);
             }
         }
         return unmatched;
     }
 
-    // TODO assert only one multiarg
-    void parse_positional_arguments(std::span<char const* const*> input)
+    void parse_positional_arguments(std::span<token const* const> input)
     {
         auto input_it = input.begin();
         for (auto it = positional_args.begin(); it < positional_args.end();
@@ -330,7 +368,7 @@ struct cli {
             std::visit(
                 overloaded{
                     [&](bound_value& x) {
-                        x.assign_parsed(**input_it);
+                        x.assign_parsed((*input_it)->str);
                         ++input_it;
                     },
                     [&](bound_container& x) {
@@ -341,7 +379,7 @@ struct cli {
                             throw invalid_input{"Wrong number of arguments"};
                         }
                         while (input_it < limit) {
-                            x.push_back_parsed(**input_it);
+                            x.push_back_parsed((*input_it)->str);
                             ++input_it;
                         }
                     }},
@@ -352,6 +390,7 @@ struct cli {
     std::string program_name;
     std::vector<option> options;
     std::vector<argument> positional_args;
+    bool has_multi_argument = false;
 };
 }  // namespace detail
 
