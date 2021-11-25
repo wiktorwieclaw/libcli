@@ -218,8 +218,41 @@ struct options_t {
     }
 };
 
+class c_str_iterator {
+    char const* const* ptr;
+    std::string_view str;
+
+   public:
+    explicit c_str_iterator(const char* const* ptr) : ptr{ptr} {}
+
+    auto operator<=>(c_str_iterator const&) const = default;
+
+    auto operator++() -> c_str_iterator&
+    {
+        ++ptr;
+        return *this;
+    }
+
+    auto operator++(int) -> c_str_iterator
+    {
+        auto result = *this;
+        ++(*this);
+        return result;
+    }
+
+    auto operator*() -> std::string_view const&
+    {
+        str = *ptr;
+        return str;
+    }
+
+    auto operator->() -> std::string_view const* { return &**this; }
+};
+
 struct positional_token {
     std::string value;
+
+    explicit positional_token(std::string_view value) : value{value} {}
 
     auto operator<=>(const positional_token&) const = default;
 };
@@ -228,11 +261,18 @@ struct option_token {
     std::string name;
     std::string value;
 
+    option_token(std::string_view name, std::string_view value)
+        : name{name}, value{value}
+    {
+    }
+
     auto operator<=>(const option_token&) const = default;
 };
 
 struct flag_token {
     std::string name;
+
+    explicit flag_token(std::string_view name) : name{name} {}
 
     auto operator<=>(const flag_token&) const = default;
 };
@@ -240,17 +280,20 @@ struct flag_token {
 using token = std::variant<positional_token, option_token, flag_token>;
 
 class token_iterator_impl {
-    char const* const* input_start;
-    char const* const* input_end;
-    char const* const* current = input_start;
+    c_str_iterator start;
+    c_str_iterator end;
+    c_str_iterator current = start;
     std::optional<token> tok;
     options_t* opts;
     std::vector<std::array<char, 2>> flags_buffer;
     bool are_options_terminated = false;
 
    public:
-    token_iterator_impl(std::span<char const* const> input, options_t& opts)
-        : input_start{&*input.begin()}, input_end{&*input.end()}, opts{&opts}
+    token_iterator_impl(
+        c_str_iterator start,
+        c_str_iterator end,
+        options_t& opts)
+        : start{start}, end{end}, opts{&opts}
     {
     }
 
@@ -258,7 +301,7 @@ class token_iterator_impl {
 
     auto init() -> bool
     {
-        if (current >= input_end) {
+        if (current >= end) {
             return false;
         }
         tok = make_token();
@@ -276,7 +319,7 @@ class token_iterator_impl {
             return true;
         }
 
-        if (current >= input_end) {
+        if (current >= end) {
             return false;
         }
 
@@ -294,33 +337,31 @@ class token_iterator_impl {
     // todo refactor
     auto make_token() -> std::optional<detail::token>
     {
-        auto str = std::string{*current};
-
-        if (str == "--") {
+        if (*current == "--") {
             are_options_terminated = true;
             ++current;
-            str = *current;
-            if (current >= input_end) {
+            if (current >= end) {
                 return std::optional<detail::token>{std::nullopt};
             }
         }
 
-        if (are_options_terminated || !str.starts_with('-')) {
-            return positional_token{str};
+        if (are_options_terminated || !current->starts_with('-')) {
+            return positional_token{*current};
         }
 
-        if (str[1] != '-' && str.length() > 2) {
-            for (auto it = str.rbegin(); it != str.rend() - 2; ++it) {
+        if ((*current)[1] != '-' && current->length() > 2) {
+            for (auto it = current->rbegin(); it != current->rend() - 2; ++it) {
                 flags_buffer.push_back({'-', *it});
             }
-            return flag_token{"-"s + str[1]};
+            return flag_token{"-"s + (*current)[1]};
         }
 
         // todo "-o foo" same as "-ofoo"
 
-        if (auto const pos = str.find('='); pos != std::string_view::npos) {
-            auto name = str.substr(0, pos);
-            auto value = str.substr(pos + 1);
+        if (auto const pos = current->find('=');
+            pos != std::string_view::npos) {
+            auto name = current->substr(0, pos);
+            auto value = current->substr(pos + 1);
             auto const& opt = opts->match(name);
             if (opt.description.is_flag) {
                 throw invalid_input{""};
@@ -328,16 +369,17 @@ class token_iterator_impl {
             return option_token{name, value};
         }
 
-        auto const& opt = opts->match(str);
+        auto const& opt = opts->match(*current);
         if (opt.description.is_flag) {
-            return flag_token{str};
+            return flag_token{*current};
         }
 
+        auto const name = *current;
         ++current;
-        if (current >= input_end) {
+        if (current >= end) {
             throw std::runtime_error{"Not enough args"};  // todo
         }
-        return option_token{str, *current++};
+        return option_token{name, *current++};
     }
 };
 
@@ -349,8 +391,9 @@ class token_iterator {
    public:
     token_iterator() = default;
 
-    token_iterator(std::span<char const* const> input, options_t& opts)
-        : pimpl{std::make_shared<impl>(input, opts)}
+    token_iterator(c_str_iterator start, c_str_iterator end,
+        options_t& opts)
+        : pimpl{std::make_shared<impl>(start, end, opts)}
     {
         if (!pimpl->init()) {
             pimpl.reset();
@@ -366,7 +409,7 @@ class token_iterator {
         return *this;
     }
 
-    auto operator*() -> token const& { return pimpl->token(); }
+    auto operator*() const -> token const& { return pimpl->token(); }
 
     friend auto operator==(token_iterator const& lhs, token_iterator const& rhs)
         -> bool
@@ -490,7 +533,10 @@ class cli {
                 std::get<bound_value>(opt.bound_var).assign_parsed(tok.value);
             }};
         visit_each(
-            token_iterator{input, opts},
+            token_iterator{
+                c_str_iterator{&*input.begin()},
+                c_str_iterator{&*input.end()},
+                opts},
             token_iterator{},
             token_visitor);
         return unmatched;
