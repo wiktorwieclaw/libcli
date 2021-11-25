@@ -199,6 +199,12 @@ struct argument {
 struct options_t {
     std::vector<option> opts;
 
+    // todo
+    struct option_match_result {
+        option_description* opt_desc;
+        std::size_t idx;
+    };
+
     auto match(std::string_view input) -> option&
     {
         auto it = std::ranges::find_if(opts, [&](auto& o) {
@@ -237,9 +243,9 @@ class token_iterator_impl {
     char const* const* input_start;
     char const* const* input_end;
     char const* const* current = input_start;
-    token tok;
+    std::optional<token> tok;
     options_t* opts;
-    std::string flags_buffer;
+    std::vector<std::array<char, 2>> flags_buffer;
     bool are_options_terminated = false;
 
    public:
@@ -255,55 +261,62 @@ class token_iterator_impl {
         if (current >= input_end) {
             return false;
         }
-        make_token();
+        tok = make_token();
         return true;
     }
 
-    auto token() -> token const& { return tok; }
+    auto token() -> token const& { return *tok; }
 
     auto next() -> bool
     {
+        if (!flags_buffer.empty()) {
+            auto flag = flags_buffer.back();
+            flags_buffer.pop_back();
+            tok = flag_token{std::string{flag.data(), flag.size()}};
+            return true;
+        }
+
         if (current >= input_end) {
             return false;
         }
-        make_token();
+
+        tok = make_token();
+
+        if (!tok.has_value()) {
+            return false;
+        }
+
         ++current;
         return true;
     }
 
    private:
     // todo refactor
-    void make_token()
+    auto make_token() -> std::optional<detail::token>
     {
         auto str = std::string{*current};
-
-        if (!flags_buffer.empty()) {
-            auto c = flags_buffer.front();
-            flags_buffer = flags_buffer.substr(1);
-            tok = flag_token{"-"s + c};
-            return;
-        }
 
         if (str == "--") {
             are_options_terminated = true;
             ++current;
             str = *current;
             if (current >= input_end) {
-                return;
+                return std::optional<detail::token>{std::nullopt};
             }
         }
 
         if (are_options_terminated || !str.starts_with('-')) {
-            tok = positional_token{str};
-            return;
+            return positional_token{str};
         }
 
         if (str[1] != '-' && str.length() > 2) {
-            flags_buffer = str.substr(2);
-            current -= static_cast<std::ptrdiff_t>(flags_buffer.size());
-            tok = flag_token{"-"s + str[1]};
-            return;
+            for (auto it = str.rbegin(); it != str.rend() - 2; ++it) {
+                flags_buffer.push_back({'-', *it});
+            }
+            return flag_token{"-"s + str[1]};
         }
+
+        // todo "-o foo" same as "-ofoo"
 
         if (auto const pos = str.find('='); pos != std::string_view::npos) {
             auto name = str.substr(0, pos);
@@ -312,23 +325,19 @@ class token_iterator_impl {
             if (opt.description.is_flag) {
                 throw invalid_input{""};
             }
-            tok = option_token{name, value};
-            return;
+            return option_token{name, value};
         }
 
         auto const& opt = opts->match(str);
         if (opt.description.is_flag) {
-            tok = flag_token{str};
-            return;
+            return flag_token{str};
         }
 
         ++current;
         if (current >= input_end) {
             throw std::runtime_error{"Not enough args"};  // todo
         }
-
-        tok = option_token{str, *current};
-        ++current;
+        return option_token{str, *current++};
     }
 };
 
