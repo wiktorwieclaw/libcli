@@ -63,7 +63,7 @@ TEST_CASE("parse flag")
     }
 }
 
-TEST_CASE("-- separator")
+TEST_CASE("options terminator")
 {
     auto option = false;
     auto arg = ""s;
