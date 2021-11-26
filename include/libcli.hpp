@@ -171,7 +171,7 @@ struct positional_token {
 
     explicit positional_token(std::string_view value) : value{value} {}
 
-    auto operator<=>(const positional_token&) const = default;
+    auto operator<=>(positional_token const&) const = default;
 };
 
 struct option_token {
@@ -183,7 +183,7 @@ struct option_token {
     {
     }
 
-    auto operator<=>(const option_token&) const = default;
+    auto operator<=>(option_token const&) const = default;
 };
 
 struct flag_token {
@@ -191,7 +191,7 @@ struct flag_token {
 
     explicit flag_token(std::string_view name) : name{name} {}
 
-    auto operator<=>(const flag_token&) const = default;
+    auto operator<=>(flag_token const&) const = default;
 };
 
 using token = std::variant<positional_token, option_token, flag_token>;

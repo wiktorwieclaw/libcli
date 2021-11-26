@@ -3,8 +3,10 @@ Checks: '
 bugprone-*,
 cert-*,
 cppcoreguidelines-*,
+-cppcoreguidelines-pro-bounds-pointer-arithmetic,
 modernize-*,
 -modernize-avoid-c-arrays,
+-modernize-use-nodiscard,
 readability-*,
 -readability-braces-around-statements,
 performance-*,
@@ -13,4 +15,5 @@ performance-*,
 hicpp-*,
 -hicpp-special-member-functions,
 -hicpp-avoid-c-arrays,
+-hicpp-use-nullptr
 '
