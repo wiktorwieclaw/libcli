@@ -273,10 +273,9 @@ struct options_t {
 
 template <typename Converted, typename InputIt>
 class conversion_iterator {
-    static_assert(
-        std::is_assignable_v<
-            Converted,
-            typename std::iterator_traits<InputIt>::value_type>);
+    static_assert(std::is_assignable_v<
+                  Converted,
+                  typename std::iterator_traits<InputIt>::value_type>);
 
     InputIt it;
     Converted converted;
@@ -407,13 +406,16 @@ class token_iterator_impl {
         }
 
         if ((*current)[1] != '-' && current->length() > 2) {
-            for (auto it = current->rbegin(); it != current->rend() - 2; ++it) {
-                flags_buffer.push_back({'-', *it});
+            if (opts->match(current->substr(0, 2)).description.is_flag) {
+                for (auto it = current->rbegin(); it != current->rend() - 2; ++it) {
+                    flags_buffer.push_back({'-', *it});
+                }
+                return flag_token{current->substr(0, 2)};
             }
-            return flag_token{"-"s + (*current)[1]};
+            else {
+                return option_token{current->substr(0, 2), current->substr(2)};
+            }
         }
-
-        // todo "-o foo" same as "-ofoo"
 
         if (auto const pos = current->find('=');
             pos != std::string_view::npos) {
@@ -554,7 +556,8 @@ class cli {
     auto add_option(T& var, std::string name, std::string shorthand = "")
         -> option_description const&
     {
-        validate_option_specification(name, shorthand);  // TODO move to parsing
+        validate_option_specification(name,
+                                      shorthand);  // TODO move to parsing
         opts.opts.emplace_back(std::move(name), std::move(shorthand), var);
         return opts.opts.back().description;
     }

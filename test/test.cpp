@@ -63,6 +63,40 @@ TEST_CASE("parse flag")
     }
 }
 
+TEST_CASE("parse option")
+{
+    auto option = std::optional<int>{};
+    auto cli = libcli::cli{};
+    cli.add_option(option, "--option", "-o");
+
+    SECTION("--option=1")
+    {
+        cli.parse({"app_name", "--option=1"});
+        REQUIRE(option.value() == 1);
+    }
+
+    SECTION("--option 1")
+    {
+        option = std::nullopt;
+        cli.parse({"app_name", "--option", "1"});
+        REQUIRE(option.value() == 1);
+    }
+
+    SECTION("-o 1")
+    {
+        option = std::nullopt;
+        cli.parse({"app_name", "-o", "1"});
+        REQUIRE(option.value() == 1);
+    }
+
+    SECTION("-o1")
+    {
+        option = std::nullopt;
+        cli.parse({"app_name", "-o1"});
+        REQUIRE(option.value() == 1);
+    }
+}
+
 TEST_CASE("options terminator")
 {
     auto option = false;
