@@ -255,22 +255,22 @@ struct options_t {
     }
 };
 
-class c_str_iterator {
+class to_sv_iterator {
     char const* const* ptr;
     std::string_view str;
 
    public:
-    explicit c_str_iterator(const char* const* ptr) : ptr{ptr} {}
+    explicit to_sv_iterator(const char* const* ptr) : ptr{ptr} {}
 
-    auto operator<=>(c_str_iterator const&) const = default;
+    auto operator<=>(to_sv_iterator const&) const = default;
 
-    auto operator++() -> c_str_iterator&
+    auto operator++() -> to_sv_iterator&
     {
         ++ptr;
         return *this;
     }
 
-    auto operator++(int) -> c_str_iterator
+    auto operator++(int) -> to_sv_iterator
     {
         auto result = *this;
         ++(*this);
@@ -287,9 +287,9 @@ class c_str_iterator {
 };
 
 class token_iterator_impl {
-    c_str_iterator start;
-    c_str_iterator end;
-    c_str_iterator current = start;
+    to_sv_iterator start;
+    to_sv_iterator end;
+    to_sv_iterator current = start;
     std::optional<token> tok;
     options_t* opts;
     std::vector<std::array<char, 2>> flags_buffer;
@@ -297,8 +297,8 @@ class token_iterator_impl {
 
    public:
     token_iterator_impl(
-        c_str_iterator start,
-        c_str_iterator end,
+        to_sv_iterator start,
+        to_sv_iterator end,
         options_t& opts)
         : start{start}, end{end}, opts{&opts}
     {
@@ -398,7 +398,7 @@ class token_iterator {
    public:
     token_iterator() = default;
 
-    token_iterator(c_str_iterator start, c_str_iterator end, options_t& opts)
+    token_iterator(to_sv_iterator start, to_sv_iterator end, options_t& opts)
         : pimpl{std::make_shared<impl>(start, end, opts)}
     {
         if (!pimpl->init()) {
@@ -514,7 +514,7 @@ class cli {
             throw std::logic_error{"Input cannot be empty"};
         }
         program_name = argv[0];
-        auto unmatched = parse_options({argv + 1, argv + argc});
+        auto unmatched = parse_options(argv + 1, argv + argc);
         parse_positional_arguments(unmatched);
     }
 
@@ -524,7 +524,7 @@ class cli {
     }
 
    private:
-    auto parse_options(std::span<char const* const> input)
+    auto parse_options(char const* const* start, char const* const* end)
         -> std::vector<positional_token>
     {
         auto unmatched = std::vector<positional_token>{};
@@ -535,10 +535,7 @@ class cli {
                 opts.match(tok.name).write_parsed(tok.value);
             }};
         visit_each(
-            token_iterator{
-                c_str_iterator{&*input.begin()},
-                c_str_iterator{&*input.end()},
-                opts},
+            token_iterator{to_sv_iterator{start}, to_sv_iterator{end}, opts},
             token_iterator{},
             token_visitor);
         return unmatched;
