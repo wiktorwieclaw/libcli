@@ -3,10 +3,8 @@
 
 #include <algorithm>
 #include <cctype>
-#include <concepts>
 #include <memory>
-#include <ranges>
-#include <span>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -34,15 +32,24 @@ struct invalid_input : public std::runtime_error {
     using runtime_error::runtime_error;
 };
 
-// clang-format off
-template <typename T>
-concept input_streamable = requires(std::istream& is, T& x) {
-    { is >> x } -> std::convertible_to<std::istream&>;
+template <typename T, typename = void>
+struct is_from_istream_readable : std::false_type {
 };
-// clang-format on
 
-inline void parse(std::string_view input, input_streamable auto& result)
+template <typename T>
+struct is_from_istream_readable<
+    T,
+    std::void_t<decltype(std::declval<std::istream&>() >> std::declval<T&>())>>
+    : std::true_type {
+};
+
+template <typename T>
+constexpr auto is_from_istream_readable_v = is_from_istream_readable<T>::value;
+
+template <typename T>
+inline void parse(std::string_view input, T& result)
 {
+    static_assert(is_from_istream_readable_v<T>);
     auto ss = std::stringstream{};
     ss << input;
     ss >> result;
@@ -55,19 +62,14 @@ inline void parse(std::string_view input, std::string& result)
     result = ss.str();
 }
 
-template <std::default_initializable T>
+template <typename T>
 inline void parse(std::string_view input, std::optional<T>& o)
 {
+    static_assert(
+        std::is_default_constructible_v<T> && is_from_istream_readable_v<T>);
     o = T{};
     parse(input, *o);
 }
-
-// clang-format off
-template <typename T>
-concept parsable = requires(std::string_view str, T& out) {
-    { parse(str, out) } -> std::same_as<void>;
-};
-// clang-format on
 
 class bound_flag {
     bool* var_ptr;
@@ -118,7 +120,7 @@ class bound_container {
         virtual auto size() const -> std::size_t = 0;
     };
 
-    template <parsable T>
+    template <typename T>
     class storage : public storage_base {
         std::vector<T>* var_ptr;
 
@@ -136,7 +138,7 @@ class bound_container {
     std::unique_ptr<storage_base> storage_ptr;
 
    public:
-    template <parsable T>
+    template <typename T>
     explicit bound_container(std::vector<T>& var)
         : storage_ptr{std::make_unique<storage<T>>(var)}
     {
@@ -150,7 +152,8 @@ class bound_container {
     auto size() const -> std::size_t { return storage_ptr->size(); }
 };
 
-inline auto make_bound_variable(auto& var) -> bound_value
+template <typename T>
+inline auto make_bound_variable(T& var) -> bound_value
 {
     return bound_value{var};
 }
@@ -160,7 +163,7 @@ inline auto make_bound_variable(bool& var) -> bound_flag
     return bound_flag{var};
 }
 
-template <parsable T>
+template <typename T>
 inline auto make_bound_variable(std::vector<T>& var) -> bound_container
 {
     return bound_container{var};
@@ -171,7 +174,10 @@ struct positional_token {
 
     explicit positional_token(std::string_view value) : value{value} {}
 
-    auto operator<=>(positional_token const&) const = default;
+    auto operator==(positional_token const& other) const -> bool
+    {
+        return value == other.value;
+    }
 };
 
 struct option_token {
@@ -183,7 +189,10 @@ struct option_token {
     {
     }
 
-    auto operator<=>(option_token const&) const = default;
+    auto operator==(option_token const& other) const -> bool
+    {
+        return name == other.name && value == other.value;
+    }
 };
 
 struct flag_token {
@@ -191,7 +200,10 @@ struct flag_token {
 
     explicit flag_token(std::string_view name) : name{name} {}
 
-    auto operator<=>(flag_token const&) const = default;
+    auto operator==(flag_token const& other) const -> bool
+    {
+        return name == other.name;
+    }
 };
 
 using token = std::variant<positional_token, option_token, flag_token>;
@@ -208,7 +220,8 @@ struct option {
     bound_variable bound_var;
     option_description description;
 
-    option(std::string long_name, std::string short_name, auto& var)
+    template <typename T>
+    option(std::string long_name, std::string short_name, T& var)
         : bound_var{make_bound_variable(var)},
           description{
               std::move(long_name),
@@ -230,7 +243,10 @@ struct argument {
 
     bound_variable bound_var;
 
-    explicit argument(auto& var) : bound_var{make_bound_variable(var)} {}
+    template <typename T>
+    explicit argument(T& var) : bound_var{make_bound_variable(var)}
+    {
+    }
 };
 
 struct options_t {
@@ -244,7 +260,7 @@ struct options_t {
 
     auto match(std::string_view input) -> option&
     {
-        auto it = std::ranges::find_if(opts, [&](auto& o) {
+        auto it = std::find_if(opts.begin(), opts.end(), [&](auto& o) {
             return o.description.short_name == input ||
                    o.description.long_name == input;
         });
@@ -255,60 +271,94 @@ struct options_t {
     }
 };
 
-class to_sv_iterator {
-    char const* const* ptr;
-    std::string_view str;
+template <typename Converted, typename InputIt>
+class conversion_iterator {
+    static_assert(
+        std::is_assignable_v<
+            Converted,
+            typename std::iterator_traits<InputIt>::value_type>);
+
+    InputIt it;
+    Converted converted;
 
    public:
-    explicit to_sv_iterator(const char* const* ptr) : ptr{ptr} {}
+    using iterator_type = InputIt;
+    using iterator_category = std::input_iterator_tag;
+    using difference_type =
+        typename std::iterator_traits<InputIt>::difference_type;
+    using value_type = Converted;
+    using reference = Converted&;
+    using pointer = Converted*;
 
-    auto operator<=>(to_sv_iterator const&) const = default;
+    explicit conversion_iterator(InputIt ptr) : it{ptr} {}
 
-    auto operator++() -> to_sv_iterator&
+    auto operator==(conversion_iterator const& other) const -> bool
     {
-        ++ptr;
+        return it == other.it;
+    }
+
+    auto operator!=(conversion_iterator const& other) const -> bool
+    {
+        return !(*this == other);
+    };
+
+    auto operator++() -> conversion_iterator&
+    {
+        ++it;
         return *this;
     }
 
-    auto operator++(int) -> to_sv_iterator
+    auto operator++(int) -> conversion_iterator
     {
-        auto result = *this;
+        auto temp = *this;
         ++(*this);
-        return result;
+        return temp;
     }
 
-    auto operator*() -> std::string_view const&
+    auto operator*() -> Converted const&
     {
-        str = *ptr;
-        return str;
+        converted = *it;
+        return converted;
     }
 
-    auto operator->() -> std::string_view const* { return &**this; }
+    auto operator->() -> Converted const* { return &**this; }
 };
 
+template <typename InputIt>
 class token_iterator_impl {
-    to_sv_iterator start;
-    to_sv_iterator end;
-    to_sv_iterator current = start;
+    static_assert(std::is_same_v<
+                  typename std::iterator_traits<InputIt>::value_type,
+                  std::string_view>);
+
+    InputIt current;
+    InputIt end;
     std::optional<token> tok;
     options_t* opts;
     std::vector<std::array<char, 2>> flags_buffer;
     bool are_options_terminated = false;
 
    public:
-    token_iterator_impl(
-        to_sv_iterator start,
-        to_sv_iterator end,
-        options_t& opts)
-        : start{start}, end{end}, opts{&opts}
+    token_iterator_impl(InputIt start, InputIt end, options_t& opts)
+        : current{start}, end{end}, opts{&opts}
     {
     }
 
-    auto operator<=>(const token_iterator_impl&) const = default;
+    auto operator==(token_iterator_impl const& other) const -> bool
+    {
+        return end == other.end && current == other.current &&
+               tok == other.tok && opts == other.opts &&
+               flags_buffer == other.flags_buffer &&
+               are_options_terminated == other.are_options_terminated;
+    };
+
+    auto operator!=(token_iterator_impl const& other) const -> bool
+    {
+        return !(*this == other);
+    };
 
     auto init() -> bool
     {
-        if (current >= end) {
+        if (current == end) {
             return false;
         }
         tok = make_token();
@@ -326,7 +376,7 @@ class token_iterator_impl {
             return true;
         }
 
-        if (current >= end) {
+        if (current == end) {
             return false;
         }
 
@@ -347,12 +397,12 @@ class token_iterator_impl {
         if (*current == "--") {
             are_options_terminated = true;
             ++current;
-            if (current >= end) {
+            if (current == end) {
                 return std::optional<detail::token>{std::nullopt};
             }
         }
 
-        if (are_options_terminated || !current->starts_with('-')) {
+        if (are_options_terminated || (*current)[0] != '-') {
             return positional_token{*current};
         }
 
@@ -383,22 +433,30 @@ class token_iterator_impl {
 
         auto const name = *current;
         ++current;
-        if (current >= end) {
+        if (current == end) {
             throw std::runtime_error{"Not enough args"};  // todo
         }
         return option_token{name, *current++};
     }
 };
 
+template <typename InputIt>
 class token_iterator {
-    using impl = token_iterator_impl;
+    using impl = token_iterator_impl<InputIt>;
 
     std::shared_ptr<impl> pimpl;
 
    public:
+    using iterator_category = std::input_iterator_tag;
+    using difference_type =
+        typename std::iterator_traits<InputIt>::difference_type;
+    using value_type = token;
+    using reference = token&;
+    using pointer = token*;
+
     token_iterator() = default;
 
-    token_iterator(to_sv_iterator start, to_sv_iterator end, options_t& opts)
+    token_iterator(InputIt start, InputIt end, options_t& opts)
         : pimpl{std::make_shared<impl>(start, end, opts)}
     {
         if (!pimpl->init()) {
@@ -424,6 +482,12 @@ class token_iterator {
             return lhs.pimpl == rhs.pimpl;
         }
         return *lhs.pimpl == *rhs.pimpl;
+    }
+
+    friend auto operator!=(token_iterator const& lhs, token_iterator const& rhs)
+        -> bool
+    {
+        return !(lhs == rhs);
     }
 
    private:
@@ -486,7 +550,8 @@ class cli {
     bool has_multi_argument = false;
 
    public:
-    auto add_option(auto& var, std::string name, std::string shorthand = "")
+    template <typename T>
+    auto add_option(T& var, std::string name, std::string shorthand = "")
         -> option_description const&
     {
         validate_option_specification(name, shorthand);  // TODO move to parsing
@@ -494,7 +559,8 @@ class cli {
         return opts.opts.back().description;
     }
 
-    void add_argument(auto& var)
+    template <typename T>
+    void add_argument(T& var)
     {
         auto const& ref = args.emplace_back(var);
         if (std::holds_alternative<bound_container>(ref.bound_var)) {
@@ -534,14 +600,15 @@ class cli {
             [&](option_token const& tok) {
                 opts.match(tok.name).write_parsed(tok.value);
             }};
+        using iterator = conversion_iterator<std::string_view, decltype(start)>;
         visit_each(
-            token_iterator{to_sv_iterator{start}, to_sv_iterator{end}, opts},
-            token_iterator{},
+            token_iterator{iterator{start}, iterator{end}, opts},
+            token_iterator<iterator>{},
             token_visitor);
         return unmatched;
     }
 
-    void parse_positional_arguments(std::span<positional_token> tokens)
+    void parse_positional_arguments(std::vector<positional_token> const& tokens)
     {
         auto token_it = tokens.begin();
         for (auto arg_it = args.begin(); arg_it < args.end(); ++arg_it) {
