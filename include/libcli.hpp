@@ -166,6 +166,36 @@ inline auto make_bound_variable(std::vector<T>& var) -> bound_container
     return bound_container{var};
 }
 
+struct positional_token {
+    std::string value;
+
+    explicit positional_token(std::string_view value) : value{value} {}
+
+    auto operator<=>(const positional_token&) const = default;
+};
+
+struct option_token {
+    std::string name;
+    std::string value;
+
+    option_token(std::string_view name, std::string_view value)
+        : name{name}, value{value}
+    {
+    }
+
+    auto operator<=>(const option_token&) const = default;
+};
+
+struct flag_token {
+    std::string name;
+
+    explicit flag_token(std::string_view name) : name{name} {}
+
+    auto operator<=>(const flag_token&) const = default;
+};
+
+using token = std::variant<positional_token, option_token, flag_token>;
+
 struct option_description {
     std::string long_name;
     std::string short_name;
@@ -186,6 +216,13 @@ struct option {
               std::holds_alternative<bound_flag>(bound_var)}
     {
     }
+
+    void write_parsed(std::string_view str)
+    {
+        std::get<bound_value>(bound_var).assign_parsed(str);
+    }
+
+    void write(bool value) { std::get<bound_flag>(bound_var).assign(value); }
 };
 
 struct argument {
@@ -248,36 +285,6 @@ class c_str_iterator {
 
     auto operator->() -> std::string_view const* { return &**this; }
 };
-
-struct positional_token {
-    std::string value;
-
-    explicit positional_token(std::string_view value) : value{value} {}
-
-    auto operator<=>(const positional_token&) const = default;
-};
-
-struct option_token {
-    std::string name;
-    std::string value;
-
-    option_token(std::string_view name, std::string_view value)
-        : name{name}, value{value}
-    {
-    }
-
-    auto operator<=>(const option_token&) const = default;
-};
-
-struct flag_token {
-    std::string name;
-
-    explicit flag_token(std::string_view name) : name{name} {}
-
-    auto operator<=>(const flag_token&) const = default;
-};
-
-using token = std::variant<positional_token, option_token, flag_token>;
 
 class token_iterator_impl {
     c_str_iterator start;
@@ -391,8 +398,7 @@ class token_iterator {
    public:
     token_iterator() = default;
 
-    token_iterator(c_str_iterator start, c_str_iterator end,
-        options_t& opts)
+    token_iterator(c_str_iterator start, c_str_iterator end, options_t& opts)
         : pimpl{std::make_shared<impl>(start, end, opts)}
     {
         if (!pimpl->init()) {
@@ -524,13 +530,9 @@ class cli {
         auto unmatched = std::vector<positional_token>{};
         auto token_visitor = overloaded{
             [&](positional_token const& tok) { unmatched.push_back(tok); },
-            [&](flag_token const& tok) {
-                auto& opt = opts.match(tok.name);
-                std::get<bound_flag>(opt.bound_var).assign(true);
-            },
+            [&](flag_token const& tok) { opts.match(tok.name).write(true); },
             [&](option_token const& tok) {
-                auto& opt = opts.match(tok.name);
-                std::get<bound_value>(opt.bound_var).assign_parsed(tok.value);
+                opts.match(tok.name).write_parsed(tok.value);
             }};
         visit_each(
             token_iterator{
