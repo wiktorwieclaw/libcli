@@ -137,6 +137,21 @@ inline void parse(std::string_view input, std::optional<T>& out)
     parse(input, *out);
 }
 
+template <typename T, typename = void>
+struct is_parsable : std::false_type {
+};
+
+template <typename T>
+struct is_parsable<
+    T,
+    std::void_t<
+        decltype(parse(std::declval<std::string_view>(), std::declval<T&>()))>>
+    : std::true_type {
+};
+
+template <typename T>
+constexpr auto is_parsable_v = is_parsable<T>::value;
+
 class bound_flag {
     bool* var_ptr;
 
@@ -153,6 +168,8 @@ class bound_value {
 
     template <typename T>
     class storage : public storage_base {
+        static_assert(is_parsable_v<T>);
+
         T* var_ptr;
 
        public:
@@ -188,6 +205,8 @@ class bound_container {
 
     template <typename T>
     class storage : public storage_base {
+        static_assert(std::is_default_constructible_v<T> && is_parsable_v<T>);
+
         std::vector<T>* var_ptr;
 
        public:
