@@ -15,5 +15,6 @@ performance-*,
 hicpp-*,
 -hicpp-special-member-functions,
 -hicpp-avoid-c-arrays,
--hicpp-use-nullptr
+-hicpp-use-nullptr,
+-hicpp-braces-around-statements
 '

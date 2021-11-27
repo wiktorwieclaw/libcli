@@ -24,6 +24,72 @@ struct overloaded : Ts... {
 template <typename... Ts>
 overloaded(Ts...) -> overloaded<Ts...>;
 
+template <typename InputIt, typename Visitor>
+void visit_each(InputIt first, InputIt limit, Visitor&& v)
+{
+    while (first != limit) {
+        std::visit(std::forward<Visitor>(v), *first);
+        ++first;
+    }
+};
+
+template <typename T>
+class arrow_proxy {
+    T t;
+
+   public:
+    explicit arrow_proxy(T&& t) : t{std::forward<T>(t)} {}
+
+    auto operator->() -> T* { return &t; }
+};
+
+template <typename Converted, typename InputIt>
+class convert_iterator {
+    static_assert(  //
+        std::is_convertible_v<
+            typename std::iterator_traits<InputIt>::value_type,
+            Converted>);
+
+    InputIt it;
+
+   public:
+    using iterator_type = InputIt;
+    using iterator_category = std::input_iterator_tag;
+    using difference_type = std::ptrdiff_t;
+    using value_type = Converted;
+    using reference = Converted;
+    using pointer = arrow_proxy<Converted>;
+
+    explicit convert_iterator(InputIt it) : it{it} {}
+
+    auto operator==(convert_iterator const& other) const -> bool
+    {
+        return it == other.it;
+    }
+
+    auto operator!=(convert_iterator const& other) const -> bool
+    {
+        return !(*this == other);
+    };
+
+    auto operator++() -> convert_iterator&
+    {
+        ++it;
+        return *this;
+    }
+
+    auto operator++(int) -> convert_iterator
+    {
+        auto temp = *this;
+        ++(*this);
+        return temp;
+    }
+
+    auto operator*() const -> reference { return *it; }
+
+    auto operator->() const -> pointer { return arrow_proxy{**this}; }
+};
+
 struct invalid_cli_specification : public std::invalid_argument {
     using invalid_argument::invalid_argument;
 };
@@ -47,28 +113,28 @@ template <typename T>
 constexpr auto is_from_istream_readable_v = is_from_istream_readable<T>::value;
 
 template <typename T>
-inline void parse(std::string_view input, T& result)
+inline void parse(std::string_view input, T& out)
 {
     static_assert(is_from_istream_readable_v<T>);
     auto ss = std::stringstream{};
     ss << input;
-    ss >> result;
+    ss >> out;
 }
 
-inline void parse(std::string_view input, std::string& result)
+inline void parse(std::string_view input, std::string& out)
 {
     auto ss = std::stringstream{};
     ss << input;
-    result = ss.str();
+    out = ss.str();
 }
 
 template <typename T>
-inline void parse(std::string_view input, std::optional<T>& o)
+inline void parse(std::string_view input, std::optional<T>& out)
 {
     static_assert(
         std::is_default_constructible_v<T> && is_from_istream_readable_v<T>);
-    o = T{};
-    parse(input, *o);
+    out = T{};
+    parse(input, *out);
 }
 
 class bound_flag {
@@ -169,6 +235,69 @@ inline auto make_bound_variable(std::vector<T>& var) -> bound_container
     return bound_container{var};
 }
 
+struct option_description {
+    std::string long_name;
+    std::string short_name;
+    bool is_flag;
+};
+
+struct option {
+    using bound_variable = std::variant<bound_flag, bound_value>;
+
+    bound_variable bound_var;
+    option_description description;
+
+    template <typename T>
+    option(std::string long_name, std::string short_name, T& var)
+        : bound_var{make_bound_variable(var)},
+          description{
+              std::move(long_name),
+              std::move(short_name),
+              std::holds_alternative<bound_flag>(bound_var)}
+    {
+    }
+
+    void write_parsed(std::string_view str)
+    {
+        std::get<bound_value>(bound_var).assign_parsed(str);
+    }
+
+    void write(bool value) { std::get<bound_flag>(bound_var).assign(value); }
+};
+
+struct options {
+    std::vector<option> opts;
+
+    // todo
+    struct option_match_result {
+        option_description* opt_desc;
+        std::size_t idx;
+    };
+
+    auto match(std::string_view input) -> option&
+    {
+        auto it = std::find_if(opts.begin(), opts.end(), [&](auto& o) {
+            return o.description.short_name == input
+                || o.description.long_name == input;
+        });
+        if (it == opts.end()) {
+            throw invalid_input{"Invalid option"};
+        }
+        return *it;
+    }
+};
+
+struct argument {
+    using bound_variable = std::variant<bound_value, bound_container>;
+
+    bound_variable bound_var;
+
+    template <typename T>
+    explicit argument(T& var) : bound_var{make_bound_variable(var)}
+    {
+    }
+};
+
 struct positional_token {
     std::string value;
 
@@ -208,146 +337,31 @@ struct flag_token {
 
 using token = std::variant<positional_token, option_token, flag_token>;
 
-struct option_description {
-    std::string long_name;
-    std::string short_name;
-    bool is_flag;
-};
-
-struct option {
-    using bound_variable = std::variant<bound_flag, bound_value>;
-
-    bound_variable bound_var;
-    option_description description;
-
-    template <typename T>
-    option(std::string long_name, std::string short_name, T& var)
-        : bound_var{make_bound_variable(var)},
-          description{
-              std::move(long_name),
-              std::move(short_name),
-              std::holds_alternative<bound_flag>(bound_var)}
-    {
-    }
-
-    void write_parsed(std::string_view str)
-    {
-        std::get<bound_value>(bound_var).assign_parsed(str);
-    }
-
-    void write(bool value) { std::get<bound_flag>(bound_var).assign(value); }
-};
-
-struct argument {
-    using bound_variable = std::variant<bound_value, bound_container>;
-
-    bound_variable bound_var;
-
-    template <typename T>
-    explicit argument(T& var) : bound_var{make_bound_variable(var)}
-    {
-    }
-};
-
-struct options_t {
-    std::vector<option> opts;
-
-    // todo
-    struct option_match_result {
-        option_description* opt_desc;
-        std::size_t idx;
-    };
-
-    auto match(std::string_view input) -> option&
-    {
-        auto it = std::find_if(opts.begin(), opts.end(), [&](auto& o) {
-            return o.description.short_name == input ||
-                   o.description.long_name == input;
-        });
-        if (it == opts.end()) {
-            throw invalid_input{"Invalid option"};
-        }
-        return *it;
-    }
-};
-
-template <typename Converted, typename InputIt>
-class conversion_iterator {
-    static_assert(std::is_assignable_v<
-                  Converted,
-                  typename std::iterator_traits<InputIt>::value_type>);
-
-    InputIt it;
-    Converted converted;
-
-   public:
-    using iterator_type = InputIt;
-    using iterator_category = std::input_iterator_tag;
-    using difference_type =
-        typename std::iterator_traits<InputIt>::difference_type;
-    using value_type = Converted;
-    using reference = Converted&;
-    using pointer = Converted*;
-
-    explicit conversion_iterator(InputIt ptr) : it{ptr} {}
-
-    auto operator==(conversion_iterator const& other) const -> bool
-    {
-        return it == other.it;
-    }
-
-    auto operator!=(conversion_iterator const& other) const -> bool
-    {
-        return !(*this == other);
-    };
-
-    auto operator++() -> conversion_iterator&
-    {
-        ++it;
-        return *this;
-    }
-
-    auto operator++(int) -> conversion_iterator
-    {
-        auto temp = *this;
-        ++(*this);
-        return temp;
-    }
-
-    auto operator*() -> Converted const&
-    {
-        converted = *it;
-        return converted;
-    }
-
-    auto operator->() -> Converted const* { return &**this; }
-};
-
 template <typename InputIt>
 class token_iterator_impl {
-    static_assert(std::is_same_v<
-                  typename std::iterator_traits<InputIt>::value_type,
-                  std::string_view>);
+    static_assert(  //
+        std::is_same_v<
+            typename std::iterator_traits<InputIt>::value_type,
+            std::string_view>);
 
-    InputIt current;
+    InputIt it;
     InputIt end;
     std::optional<token> tok;
-    options_t* opts;
+    options* opts;
     std::vector<std::array<char, 2>> flags_buffer;
     bool are_options_terminated = false;
 
    public:
-    token_iterator_impl(InputIt start, InputIt end, options_t& opts)
-        : current{start}, end{end}, opts{&opts}
+    token_iterator_impl(InputIt start, InputIt end, options& opts)
+        : it{start}, end{end}, opts{&opts}
     {
     }
 
     auto operator==(token_iterator_impl const& other) const -> bool
     {
-        return end == other.end && current == other.current &&
-               tok == other.tok && opts == other.opts &&
-               flags_buffer == other.flags_buffer &&
-               are_options_terminated == other.are_options_terminated;
+        return end == other.end && it == other.it && tok == other.tok
+            && opts == other.opts && flags_buffer == other.flags_buffer
+            && are_options_terminated == other.are_options_terminated;
     };
 
     auto operator!=(token_iterator_impl const& other) const -> bool
@@ -357,7 +371,7 @@ class token_iterator_impl {
 
     auto init() -> bool
     {
-        if (current == end) {
+        if (it == end) {
             return false;
         }
         tok = make_token();
@@ -371,74 +385,55 @@ class token_iterator_impl {
         if (!flags_buffer.empty()) {
             auto flag = flags_buffer.back();
             flags_buffer.pop_back();
-            tok = flag_token{std::string{flag.data(), flag.size()}};
+            tok = flag_token{{flag.data(), flag.size()}};
             return true;
         }
 
-        if (current == end) {
-            return false;
+        if (it == end) return false;
+
+        if (*it == "--") {
+            are_options_terminated = true;
+            if (++it == end) return false;
         }
 
         tok = make_token();
+        ++it;
 
-        if (!tok.has_value()) {
-            return false;
-        }
-
-        ++current;
         return true;
     }
 
    private:
     // todo refactor
-    auto make_token() -> std::optional<detail::token>
+    auto make_token() -> detail::token
     {
-        if (*current == "--") {
-            are_options_terminated = true;
-            ++current;
-            if (current == end) {
-                return std::optional<detail::token>{std::nullopt};
-            }
+        if ((*it)[0] != '-' || are_options_terminated) {
+            return positional_token{*it};
         }
-
-        if (are_options_terminated || (*current)[0] != '-') {
-            return positional_token{*current};
+        if ((*it)[1] != '-' && it->length() > 2) {
+            auto const name = it->substr(0, 2);
+            if (!opts->match(name).description.is_flag) {
+                return option_token{name, it->substr(2)};
+            }
+            std::for_each(it->rbegin(), it->rend() - 2, [&](auto f) {
+                flags_buffer.push_back({'-', f});
+            });
+            return flag_token{name};
         }
-
-        if ((*current)[1] != '-' && current->length() > 2) {
-            if (opts->match(current->substr(0, 2)).description.is_flag) {
-                for (auto it = current->rbegin(); it != current->rend() - 2; ++it) {
-                    flags_buffer.push_back({'-', *it});
-                }
-                return flag_token{current->substr(0, 2)};
-            }
-            else {
-                return option_token{current->substr(0, 2), current->substr(2)};
-            }
-        }
-
-        if (auto const pos = current->find('=');
-            pos != std::string_view::npos) {
-            auto name = current->substr(0, pos);
-            auto value = current->substr(pos + 1);
-            auto const& opt = opts->match(name);
-            if (opt.description.is_flag) {
-                throw invalid_input{""};
-            }
+        if (auto const pos = it->find('='); pos != std::string_view::npos) {
+            auto const name = it->substr(0, pos);
+            auto const value = it->substr(pos + 1);
+            if (opts->match(name).description.is_flag)
+                throw invalid_input{""};  // todo
             return option_token{name, value};
         }
-
-        auto const& opt = opts->match(*current);
-        if (opt.description.is_flag) {
-            return flag_token{*current};
+        if (opts->match(*it).description.is_flag) {
+            return flag_token{*it};
         }
-
-        auto const name = *current;
-        ++current;
-        if (current == end) {
-            throw std::runtime_error{"Not enough args"};  // todo
+        auto const name = *it;
+        if (++it == end) {
+            throw invalid_input{"Not enough args"};  // todo
         }
-        return option_token{name, *current++};
+        return option_token{name, *it++};
     }
 };
 
@@ -450,15 +445,14 @@ class token_iterator {
 
    public:
     using iterator_category = std::input_iterator_tag;
-    using difference_type =
-        typename std::iterator_traits<InputIt>::difference_type;
+    using difference_type = std::ptrdiff_t;
     using value_type = token;
-    using reference = token&;
-    using pointer = token*;
+    using reference = token const&;
+    using pointer = token const*;
 
     token_iterator() = default;
 
-    token_iterator(InputIt start, InputIt end, options_t& opts)
+    token_iterator(InputIt start, InputIt end, options& opts)
         : pimpl{std::make_shared<impl>(start, end, opts)}
     {
         if (!pimpl->init()) {
@@ -475,7 +469,9 @@ class token_iterator {
         return *this;
     }
 
-    auto operator*() const -> token const& { return pimpl->token(); }
+    auto operator*() const -> reference { return pimpl->token(); }
+
+    auto operator->() const -> pointer { return &**this; }
 
     friend auto operator==(token_iterator const& lhs, token_iterator const& rhs)
         -> bool
@@ -536,18 +532,9 @@ inline void validate_option_specification(
     validate_option_shorthand(shorthand);
 }
 
-template <typename InputIt, typename Visitor>
-void visit_each(InputIt first, InputIt limit, Visitor&& v)
-{
-    while (first != limit) {
-        std::visit(std::forward<Visitor>(v), *first);
-        ++first;
-    }
-};
-
 class cli {
     std::string program_name;
-    options_t opts;
+    options opts;
     std::vector<argument> args;
     bool has_multi_argument = false;
 
@@ -556,8 +543,7 @@ class cli {
     auto add_option(T& var, std::string name, std::string shorthand = "")
         -> option_description const&
     {
-        validate_option_specification(name,
-                                      shorthand);  // TODO move to parsing
+        validate_option_specification(name, shorthand);
         opts.opts.emplace_back(std::move(name), std::move(shorthand), var);
         return opts.opts.back().description;
     }
@@ -603,7 +589,7 @@ class cli {
             [&](option_token const& tok) {
                 opts.match(tok.name).write_parsed(tok.value);
             }};
-        using iterator = conversion_iterator<std::string_view, decltype(start)>;
+        using iterator = convert_iterator<std::string_view, decltype(start)>;
         visit_each(
             token_iterator{iterator{start}, iterator{end}, opts},
             token_iterator<iterator>{},

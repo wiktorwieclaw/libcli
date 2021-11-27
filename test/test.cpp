@@ -43,15 +43,14 @@ TEST_CASE("parse flag")
 
     SECTION("--flag")
     {
-        flag = false;
         cli.parse({"app_name", "--flag"});
         REQUIRE(flag == true);
     }
 
-    SECTION("--flag unrelated")
+    SECTION("--flag untouched")
     {
         flag = false;
-        cli.parse({"app_name", "--flag", "unrelated"});
+        cli.parse({"app_name", "--flag", "untouched"});
         REQUIRE(flag == true);
     }
 
@@ -82,6 +81,20 @@ TEST_CASE("parse option")
         REQUIRE(option.value() == 1);
     }
 
+    SECTION("--option")
+    {
+        REQUIRE_THROWS_AS(
+            cli.parse({"app_name", "--option"}),
+            libcli::invalid_input);
+    }
+
+    SECTION("-option")
+    {
+        REQUIRE_THROWS_AS(
+            cli.parse({"app_name", "--option"}),
+            libcli::invalid_input);
+    }
+
     SECTION("-o 1")
     {
         option = std::nullopt;
@@ -94,6 +107,20 @@ TEST_CASE("parse option")
         option = std::nullopt;
         cli.parse({"app_name", "-o1"});
         REQUIRE(option.value() == 1);
+    }
+
+    SECTION("-o")
+    {
+        REQUIRE_THROWS_AS(
+            cli.parse({"app_name", "-o"}),
+            libcli::invalid_input);
+    }
+
+    SECTION("--o")
+    {
+        REQUIRE_THROWS_AS(
+            cli.parse({"app_name", "--option"}),
+            libcli::invalid_input);
     }
 }
 
