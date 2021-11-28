@@ -105,12 +105,12 @@ struct invalid_cli_specification : public std::invalid_argument {
 
 struct invalid_input : public std::runtime_error {
     using runtime_error::runtime_error;
-//    todo decide on using this ctor
-//    template <typename... Args>
-//    explicit invalid_input(Args&&... args)
-//        : std::runtime_error(join(std::forward<Args>(args)...))
-//    {
-//    }
+    //    todo decide on using this ctor
+    //    template <typename... Args>
+    //    explicit invalid_input(Args&&... args)
+    //        : std::runtime_error(join(std::forward<Args>(args)...))
+    //    {
+    //    }
 };
 
 template <typename T, typename = void>
@@ -272,8 +272,8 @@ inline auto make_bound_variable(std::vector<T>& var) -> bound_container
 }
 
 struct option_description {
-    std::string long_name;
-    std::string short_name;
+    std::string name;
+    std::string shorthand;
     bool is_flag;
 };
 
@@ -310,7 +310,7 @@ auto match(std::string_view str, std::vector<option> const& opts)
     -> match_result
 {
     auto const it = std::find_if(opts.begin(), opts.end(), [&](auto const& o) {
-        return o.desc.short_name == str || o.desc.long_name == str;
+        return o.desc.shorthand == str || o.desc.name == str;
     });
     if (it == opts.end()) throw invalid_input{join(str, " is not an option")};
     return {&it->desc, static_cast<size_t>(it - opts.begin())};
@@ -562,12 +562,28 @@ inline void validate_option_shorthand(std::string_view shorthand)
     }
 }
 
+inline void validate_uniqueness(
+    std::string_view name,
+    std::string_view shorthand,
+    std::vector<option> const& opts)
+{
+    std::for_each(opts.begin(), opts.end(), [&](auto const& o) {
+        if (o.desc.name == name)
+            throw invalid_cli_specification{join(name, " is already defined")};
+        if (o.desc.shorthand == shorthand)
+            throw invalid_cli_specification{
+                join(shorthand, " is already defined")};
+    });
+}
+
 inline void validate_option_specification(
     std::string_view name,
-    std::string_view shorthand)
+    std::string_view shorthand,
+    std::vector<option> const& opts)
 {
     validate_option_name(name);
     validate_option_shorthand(shorthand);
+    validate_uniqueness(name, shorthand, opts);
 }
 
 class cli {
@@ -581,7 +597,7 @@ class cli {
     auto add_option(T& var, std::string name, std::string shorthand = "")
         -> option_description const&
     {
-        validate_option_specification(name, shorthand);
+        validate_option_specification(name, shorthand, opts);
         opts.emplace_back(std::move(name), std::move(shorthand), var);
         return opts.back().desc;
     }
