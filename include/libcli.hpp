@@ -25,7 +25,7 @@ template <typename... Ts>
 overloaded(Ts...) -> overloaded<Ts...>;
 
 template <typename InputIt, typename Visitor>
-void visit_each(InputIt first, InputIt limit, Visitor&& v)
+inline void visit_each(InputIt first, InputIt limit, Visitor&& v)
 {
     while (first != limit) {
         std::visit(std::forward<Visitor>(v), *first);
@@ -34,7 +34,7 @@ void visit_each(InputIt first, InputIt limit, Visitor&& v)
 };
 
 template <typename... Ts>
-auto join(Ts&&... ts) -> std::string
+inline auto join(Ts&&... ts) -> std::string
 {
     auto ss = std::stringstream{};
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay)
@@ -105,12 +105,6 @@ struct invalid_cli_specification : public std::invalid_argument {
 
 struct invalid_input : public std::runtime_error {
     using runtime_error::runtime_error;
-    //    todo decide on using this ctor
-    //    template <typename... Args>
-    //    explicit invalid_input(Args&&... args)
-    //        : std::runtime_error(join(std::forward<Args>(args)...))
-    //    {
-    //    }
 };
 
 template <typename T, typename = void>
@@ -421,42 +415,38 @@ class token_iterator_impl {
             flags_buffer.pop_back();
             return true;
         }
-
         if (it == end) return false;
-
         if (*it == "--") {
             are_options_terminated = true;
             if (++it == end) return false;
         }
-
         tok = make_token();
         ++it;
-
         return true;
     }
 
    private:
-    // todo refactor
     auto make_token() -> detail::token
     {
-        if ((*it)[0] != '-' || are_options_terminated) {
+        if ((*it)[0] != '-' || are_options_terminated)
             return positional_token{*it};
-        }
-        if ((*it)[1] != '-' && it->length() > 2) {
-            auto const name = it->substr(0, 2);
-            auto const [desc, idx] = match(name, *opts);
-            if (!desc->is_flag) {
-                return option_token{name, it->substr(2), idx};
+        if ((*it)[1] != '-') {
+            if (it->length() > 2) {
+                auto const name = it->substr(0, 2);
+                auto const value = it->substr(2);
+                auto const [desc, idx] = match(name, *opts);
+                if (!desc->is_flag) return option_token{name, value, idx};
+                std::for_each(value.rbegin(), value.rend(), [&](auto f) {
+                    auto name = "- "s;
+                    name[1] = f;
+                    auto const idx_ = match(name, *opts).idx;
+                    flags_buffer.emplace_back(name, idx_);
+                });
+                return flag_token{name, idx};
             }
-            std::for_each(it->rbegin(), it->rend() - 2, [&](auto f) {
-                auto name = "- "s;
-                name[1] = f;
-                auto const idx_ = match(name, *opts).idx;
-                flags_buffer.emplace_back(name, idx_);
-            });
-            return flag_token{name, idx};
         }
-        if (auto const pos = it->find('='); pos != std::string_view::npos) {
+        else if (auto const pos = it->find('=');
+                 pos != std::string_view::npos) {
             auto const name = it->substr(0, pos);
             auto const value = it->substr(pos + 1);
             auto const [desc, idx] = match(name, *opts);
@@ -464,13 +454,10 @@ class token_iterator_impl {
             return option_token{name, value, idx};
         }
         auto const [desc, idx] = match(*it, *opts);
-        if (desc->is_flag) {
-            return flag_token{*it, idx};
-        }
+        if (desc->is_flag) return flag_token{*it, idx};
         auto const name = *it;
-        if (++it == end) {
+        if (++it == end)
             throw invalid_input{join(name, " is missing an argument")};
-        }
         return option_token{name, *it++, idx};
     }
 };
@@ -493,17 +480,13 @@ class token_iterator {
     token_iterator(InputIt start, InputIt end, std::vector<option>& opts)
         : pimpl{std::make_shared<impl>(start, end, opts)}
     {
-        if (!pimpl->init()) {
-            pimpl.reset();
-        }
+        if (!pimpl->init()) pimpl.reset();
     }
 
     auto operator++() -> token_iterator&
     {
         copy_on_write();
-        if (!pimpl->next()) {
-            pimpl.reset();
-        }
+        if (!pimpl->next()) pimpl.reset();
         return *this;
     }
 
@@ -514,9 +497,8 @@ class token_iterator {
     friend auto operator==(token_iterator const& lhs, token_iterator const& rhs)
         -> bool
     {
-        if (lhs.pimpl == nullptr || rhs.pimpl == nullptr) {
+        if (lhs.pimpl == nullptr || rhs.pimpl == nullptr)
             return lhs.pimpl == rhs.pimpl;
-        }
         return *lhs.pimpl == *rhs.pimpl;
     }
 
@@ -529,9 +511,8 @@ class token_iterator {
    private:
     void copy_on_write()
     {
-        if (pimpl != nullptr && pimpl.use_count() > 1) {
+        if (pimpl != nullptr && pimpl.use_count() > 1)
             pimpl = std::make_shared<impl>(*pimpl);
-        }
     }
 };
 
@@ -654,9 +635,8 @@ class cli {
     {
         auto token_it = tokens.begin();
         for (auto arg_it = args.begin(); arg_it < args.end(); ++arg_it) {
-            if (token_it == tokens.end()) {
+            if (token_it == tokens.end())
                 throw invalid_input("Wrong number of arguments");
-            }
             auto bound_variable_visitor = overloaded{
                 [&](bound_value& value) {
                     value.assign_parsed(token_it->value);
@@ -665,9 +645,8 @@ class cli {
                 [&](bound_container& container) {
                     auto const num_args_left = args.end() - (arg_it + 1);
                     auto const limit = tokens.end() - num_args_left;
-                    if (token_it > limit) {
+                    if (token_it > limit)
                         throw invalid_input{"Wrong number of arguments"};
-                    }
                     while (token_it < limit) {
                         container.push_back_parsed(token_it->value);
                         ++token_it;
