@@ -11,6 +11,8 @@
 #include <variant>
 #include <vector>
 
+#define LIBCLI_REQUIRES(expr) std::enable_if_t<expr, int> = 0
+
 namespace libcli {
 namespace detail {
 
@@ -33,6 +35,17 @@ inline void visit_each(InputIt first, InputIt limit, Visitor&& v)
     }
 };
 
+template <typename T>
+struct is_vector : std::false_type {
+};
+
+template <typename T>
+struct is_vector<std::vector<T>> : std::true_type {
+};
+
+template <typename T>
+inline constexpr auto is_vector_v = is_vector<T>::value;
+
 template <typename... Ts>
 inline auto join(Ts&&... ts) -> std::string
 {
@@ -52,13 +65,14 @@ class arrow_proxy {
     auto operator->() -> T* { return &t; }
 };
 
-template <typename Converted, typename InputIt>
-class convert_iterator {
-    static_assert(  //
+template <
+    typename Converted,
+    typename InputIt,
+    LIBCLI_REQUIRES((  //
         std::is_convertible_v<
             typename std::iterator_traits<InputIt>::value_type,
-            Converted>);
-
+            Converted>))>
+class convert_iterator {
     InputIt it;
 
    public:
@@ -99,7 +113,7 @@ class convert_iterator {
     auto operator->() const -> pointer { return arrow_proxy{**this}; }
 };
 
-struct invalid_cli_specification : public std::invalid_argument {
+struct invalid_cli_definition : public std::invalid_argument {
     using invalid_argument::invalid_argument;
 };
 
@@ -119,47 +133,46 @@ struct is_from_istream_readable<
 };
 
 template <typename T>
-constexpr auto is_from_istream_readable_v = is_from_istream_readable<T>::value;
+inline constexpr auto is_from_istream_readable_v =
+    is_from_istream_readable<T>::value;
+
+template <typename T, typename = void>
+struct is_from_sv_parsable;
 
 template <typename T>
+constexpr auto is_from_sv_parsable_v = is_from_sv_parsable<T>::value;
+
+inline void parse(std::string_view input, std::string& out) { out = input; }
+
+template <typename T, LIBCLI_REQUIRES(is_from_istream_readable_v<T>)>
 inline void parse(std::string_view input, T& out)
 {
-    static_assert(is_from_istream_readable_v<T>);
     auto ss = std::stringstream{};
     ss << input;
     ss >> out;
 }
 
-inline void parse(std::string_view input, std::string& out)
-{
-    auto ss = std::stringstream{};
-    ss << input;
-    out = ss.str();
-}
-
-template <typename T>
+template <
+    typename T,
+    LIBCLI_REQUIRES(
+        std::is_default_constructible_v<T>&& is_from_sv_parsable_v<T>)>
 inline void parse(std::string_view input, std::optional<T>& out)
 {
-    static_assert(
-        std::is_default_constructible_v<T> && is_from_istream_readable_v<T>);
     out = T{};
     parse(input, *out);
 }
 
-template <typename T, typename = void>
-struct is_parsable : std::false_type {
+template <typename T, typename>
+struct is_from_sv_parsable : std::false_type {
 };
 
 template <typename T>
-struct is_parsable<
+struct is_from_sv_parsable<
     T,
     std::void_t<
         decltype(parse(std::declval<std::string_view>(), std::declval<T&>()))>>
     : std::true_type {
 };
-
-template <typename T>
-constexpr auto is_parsable_v = is_parsable<T>::value;
 
 class bound_flag {
     bool* var_ptr;
@@ -178,8 +191,6 @@ class bound_value {
 
     template <typename T>
     class storage : public storage_base {
-        static_assert(is_parsable_v<T>);
-
         T* var_ptr;
 
        public:
@@ -194,7 +205,7 @@ class bound_value {
     std::unique_ptr<storage_base> storage_ptr;
 
    public:
-    template <typename T>
+    template <typename T, LIBCLI_REQUIRES(is_from_sv_parsable_v<T>)>
     explicit bound_value(T& var)
         : storage_ptr{std::make_unique<storage<T>>(var)}
     {
@@ -216,8 +227,6 @@ class bound_container {
 
     template <typename T>
     class storage : public storage_base {
-        static_assert(std::is_default_constructible_v<T> && is_parsable_v<T>);
-
         std::vector<T>* var_ptr;
 
        public:
@@ -234,7 +243,10 @@ class bound_container {
     std::unique_ptr<storage_base> storage_ptr;
 
    public:
-    template <typename T>
+    template <
+        typename T,
+        LIBCLI_REQUIRES(
+            std::is_default_constructible_v<T>&& is_from_sv_parsable_v<T>)>
     explicit bound_container(std::vector<T>& var)
         : storage_ptr{std::make_unique<storage<T>>(var)}
     {
@@ -306,7 +318,9 @@ auto match(std::string_view str, std::vector<option> const& opts)
     auto const it = std::find_if(opts.begin(), opts.end(), [&](auto const& o) {
         return o.desc.shorthand == str || o.desc.name == str;
     });
-    if (it == opts.end()) throw invalid_input{join(str, " is not an option")};
+    if (it == opts.end()) {
+        throw invalid_input{join(str, " is not an option")};
+    }
     return {&it->desc, static_cast<size_t>(it - opts.begin())};
 }
 
@@ -365,13 +379,13 @@ struct flag_token {
 
 using token = std::variant<positional_token, option_token, flag_token>;
 
-template <typename InputIt>
-class token_iterator_impl {
-    static_assert(  //
+template <
+    typename InputIt,
+    LIBCLI_REQUIRES((  //
         std::is_same_v<
             typename std::iterator_traits<InputIt>::value_type,
-            std::string_view>);
-
+            std::string_view>))>
+class token_iterator_impl {
     InputIt it;
     InputIt end;
     std::optional<token> tok;
@@ -399,9 +413,7 @@ class token_iterator_impl {
 
     auto init() -> bool
     {
-        if (it == end) {
-            return false;
-        }
+        if (it == end) { return false; }
         tok = make_token();
         return true;
     }
@@ -415,10 +427,10 @@ class token_iterator_impl {
             flags_buffer.pop_back();
             return true;
         }
-        if (it == end) return false;
+        if (it == end) { return false; }
         if (*it == "--") {
             are_options_terminated = true;
-            if (++it == end) return false;
+            if (++it == end) { return false; }
         }
         tok = make_token();
         ++it;
@@ -428,14 +440,15 @@ class token_iterator_impl {
    private:
     auto make_token() -> detail::token
     {
-        if ((*it)[0] != '-' || are_options_terminated)
+        if ((*it)[0] != '-' || are_options_terminated) {
             return positional_token{*it};
+        }
         if ((*it)[1] != '-') {
             if (it->length() > 2) {
                 auto const name = it->substr(0, 2);
                 auto const value = it->substr(2);
                 auto const [desc, idx] = match(name, *opts);
-                if (!desc->is_flag) return option_token{name, value, idx};
+                if (!desc->is_flag) { return option_token{name, value, idx}; }
                 std::for_each(value.rbegin(), value.rend(), [&](auto f) {
                     auto name = "- "s;
                     name[1] = f;
@@ -450,14 +463,17 @@ class token_iterator_impl {
             auto const name = it->substr(0, pos);
             auto const value = it->substr(pos + 1);
             auto const [desc, idx] = match(name, *opts);
-            if (desc->is_flag) throw invalid_input{join(*it, " is invalid")};
+            if (desc->is_flag) {
+                throw invalid_input{join(*it, " is invalid")};
+            }
             return option_token{name, value, idx};
         }
         auto const [desc, idx] = match(*it, *opts);
-        if (desc->is_flag) return flag_token{*it, idx};
+        if (desc->is_flag) { return flag_token{*it, idx}; }
         auto const name = *it;
-        if (++it == end)
+        if (++it == end) {
             throw invalid_input{join(name, " is missing an argument")};
+        }
         return option_token{name, *it++, idx};
     }
 };
@@ -480,13 +496,13 @@ class token_iterator {
     token_iterator(InputIt start, InputIt end, std::vector<option>& opts)
         : pimpl{std::make_shared<impl>(start, end, opts)}
     {
-        if (!pimpl->init()) pimpl.reset();
+        if (!pimpl->init()) { pimpl.reset(); }
     }
 
     auto operator++() -> token_iterator&
     {
         copy_on_write();
-        if (!pimpl->next()) pimpl.reset();
+        if (!pimpl->next()) { pimpl.reset(); }
         return *this;
     }
 
@@ -497,8 +513,9 @@ class token_iterator {
     friend auto operator==(token_iterator const& lhs, token_iterator const& rhs)
         -> bool
     {
-        if (lhs.pimpl == nullptr || rhs.pimpl == nullptr)
+        if (lhs.pimpl == nullptr || rhs.pimpl == nullptr) {
             return lhs.pimpl == rhs.pimpl;
+        }
         return *lhs.pimpl == *rhs.pimpl;
     }
 
@@ -511,20 +528,21 @@ class token_iterator {
    private:
     void copy_on_write()
     {
-        if (pimpl != nullptr && pimpl.use_count() > 1)
+        if (pimpl != nullptr && pimpl.use_count() > 1) {
             pimpl = std::make_shared<impl>(*pimpl);
+        }
     }
 };
 
 inline void validate_option_name(std::string_view name)
 {
     if (name.size() < 3 || name.substr(0, 2) != "--") {
-        throw invalid_cli_specification{
+        throw invalid_cli_definition{
             "Option name has to start with -- and at least one character"};
     }
     for (auto const c : name.substr(2)) {
         if (std::isalnum(c) == 0 && c != '-') {
-            throw invalid_cli_specification{
+            throw invalid_cli_definition{
                 "Option name has to be composed with alphanumeric "
                 "characters or dashes"};
         }
@@ -534,11 +552,11 @@ inline void validate_option_name(std::string_view name)
 inline void validate_option_shorthand(std::string_view shorthand)
 {
     if (shorthand.size() != 2 || shorthand[0] != '-') {
-        throw invalid_cli_specification{
+        throw invalid_cli_definition{
             "Option shorthand has to start with - and one character"};
     }
     if (std::isalpha(shorthand[1]) == 0) {
-        throw invalid_cli_specification{
+        throw invalid_cli_definition{
             "Option shorthand has to be alphabetic"};
     }
 }
@@ -549,13 +567,23 @@ inline void validate_uniqueness(
     std::vector<option> const& opts)
 {
     std::for_each(opts.begin(), opts.end(), [&](auto const& o) {
-        if (o.desc.name == name)
-            throw invalid_cli_specification{join(name, " is already defined")};
-        if (o.desc.shorthand == shorthand)
-            throw invalid_cli_specification{
+        if (o.desc.name == name) {
+            throw invalid_cli_definition{join(name, " is already defined")};
+        }
+        if (o.desc.shorthand == shorthand) {
+            throw invalid_cli_definition{
                 join(shorthand, " is already defined")};
+        }
     });
 }
+
+template <typename T>
+inline constexpr auto is_to_option_bindable_v = is_from_sv_parsable_v<T>;
+
+template <typename T>
+inline constexpr auto is_to_argument_bindable_v =
+    is_from_sv_parsable_v<T>  //
+    || (is_vector_v<T> && is_from_sv_parsable_v<typename T::value_type>);
 
 inline void validate_option_specification(
     std::string_view name,
@@ -574,7 +602,7 @@ class cli {
     bool has_multi_argument = false;
 
    public:
-    template <typename T>
+    template <typename T, LIBCLI_REQUIRES(is_to_option_bindable_v<T>)>
     auto add_option(T& var, std::string name, std::string shorthand = "")
         -> option_description const&
     {
@@ -583,13 +611,13 @@ class cli {
         return opts.back().desc;
     }
 
-    template <typename T>
+    template <typename T, LIBCLI_REQUIRES(is_to_argument_bindable_v<T>)>
     void add_argument(T& var)
     {
         auto const& ref = args.emplace_back(var);
         if (std::holds_alternative<bound_container>(ref.bound_var)) {
             if (has_multi_argument) {
-                throw invalid_cli_specification{
+                throw invalid_cli_definition{
                     "There cannot be more than one multi-argument"};
             }
             has_multi_argument = true;
@@ -599,9 +627,7 @@ class cli {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
     void parse(int argc, char const* const* argv)
     {
-        if (argc <= 0) {
-            throw std::logic_error{"Input cannot be empty"};
-        }
+        if (argc <= 0) { throw std::logic_error{"Input cannot be empty"}; }
         program_name = argv[0];
         auto unmatched = parse_options(argv + 1, argv + argc);
         parse_positional_arguments(unmatched);
@@ -634,33 +660,47 @@ class cli {
     void parse_positional_arguments(std::vector<positional_token> const& tokens)
     {
         auto token_it = tokens.begin();
-        for (auto arg_it = args.begin(); arg_it < args.end(); ++arg_it) {
-            if (token_it == tokens.end())
-                throw invalid_input("Wrong number of arguments");
-            auto bound_variable_visitor = overloaded{
-                [&](bound_value& value) {
-                    value.assign_parsed(token_it->value);
+        auto arg_it = args.begin();
+        auto bound_variable_visitor = overloaded{
+            [&](bound_value& value) {
+                value.assign_parsed(token_it->value);
+                ++token_it;
+            },
+            [&](bound_container& container) {
+                auto const num_args_left = args.end() - (arg_it + 1);
+                auto const limit = tokens.end() - num_args_left;
+                if (token_it > limit) {
+                    throw invalid_input{"Wrong number of arguments"};
+                }
+                while (token_it < limit) {
+                    container.push_back_parsed(token_it->value);
                     ++token_it;
-                },
-                [&](bound_container& container) {
-                    auto const num_args_left = args.end() - (arg_it + 1);
-                    auto const limit = tokens.end() - num_args_left;
-                    if (token_it > limit)
-                        throw invalid_input{"Wrong number of arguments"};
-                    while (token_it < limit) {
-                        container.push_back_parsed(token_it->value);
-                        ++token_it;
-                    }
-                }};
+                }
+            }};
+        while (arg_it < args.end()) {
+            if (token_it == tokens.end()) {
+                throw invalid_input("Wrong number of arguments");
+            }
             std::visit(bound_variable_visitor, arg_it->bound_var);
+            ++arg_it;
         }
     }
 };
 }  // namespace detail
 
-using detail::cli;
-using detail::invalid_cli_specification;
+// concepts
+using detail::is_from_istream_readable_v;
+using detail::is_from_sv_parsable_v;
+using detail::is_to_argument_bindable_v;
+using detail::is_to_option_bindable_v;
+
+// exceptions
+using detail::invalid_cli_definition;
 using detail::invalid_input;
+
+// parsing
+using detail::cli;
+using detail::parse;
 
 }  // namespace libcli
 

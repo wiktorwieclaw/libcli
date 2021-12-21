@@ -162,7 +162,7 @@ TEST_CASE("multi-argument")
         cli.add_argument(multi_arg_1);
         REQUIRE_THROWS_AS(
             cli.add_argument(multi_arg_2),
-            libcli::invalid_cli_specification);
+            libcli::invalid_cli_definition);
     }
 
     // TODO
