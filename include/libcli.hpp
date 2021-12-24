@@ -415,10 +415,11 @@ class token_iterator_impl {
     {
         if (it == end) { return false; }
         tok = make_token();
+        ++it;
         return true;
     }
 
-    auto token() -> token const& { return *tok; }
+    auto get() -> token const& { return *tok; }
 
     auto next() -> bool
     {
@@ -474,7 +475,7 @@ class token_iterator_impl {
         if (++it == end) {
             throw invalid_input{join(name, " is missing an argument")};
         }
-        return option_token{name, *it++, idx};
+        return option_token{name, *it, idx};
     }
 };
 
@@ -506,7 +507,7 @@ class token_iterator {
         return *this;
     }
 
-    auto operator*() const -> reference { return pimpl->token(); }
+    auto operator*() const -> reference { return pimpl->get(); }
 
     auto operator->() const -> pointer { return &**this; }
 
