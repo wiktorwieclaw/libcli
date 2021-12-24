@@ -36,15 +36,10 @@ inline void visit_each(InputIt first, InputIt limit, Visitor&& v)
 };
 
 template <typename T>
-struct is_vector : std::false_type {
-};
+inline constexpr auto is_vector = false;
 
 template <typename T>
-struct is_vector<std::vector<T>> : std::true_type {
-};
-
-template <typename T>
-inline constexpr auto is_vector_v = is_vector<T>::value;
+inline constexpr auto is_vector<std::vector<T>> = true;
 
 template <typename... Ts>
 inline auto join(Ts&&... ts) -> std::string
@@ -122,29 +117,20 @@ struct invalid_input : public std::runtime_error {
 };
 
 template <typename T, typename = void>
-struct is_from_istream_readable : std::false_type {
-};
+inline constexpr auto is_from_istream_readable = false;
 
 template <typename T>
-struct is_from_istream_readable<
+inline constexpr auto is_from_istream_readable<
     T,
-    std::void_t<decltype(std::declval<std::istream&>() >> std::declval<T&>())>>
-    : std::true_type {
-};
-
-template <typename T>
-inline constexpr auto is_from_istream_readable_v =
-    is_from_istream_readable<T>::value;
+    std::void_t<
+        decltype(std::declval<std::istream&>() >> std::declval<T&>())>> = true;
 
 template <typename T, typename = void>
-struct is_from_sv_parsable;
-
-template <typename T>
-constexpr auto is_from_sv_parsable_v = is_from_sv_parsable<T>::value;
+inline constexpr auto is_from_sv_parsable = false; 
 
 inline void parse(std::string_view input, std::string& out) { out = input; }
 
-template <typename T, LIBCLI_REQUIRES(is_from_istream_readable_v<T>)>
+template <typename T, LIBCLI_REQUIRES(is_from_istream_readable<T>)>
 inline void parse(std::string_view input, T& out)
 {
     auto ss = std::stringstream{};
@@ -155,24 +141,18 @@ inline void parse(std::string_view input, T& out)
 template <
     typename T,
     LIBCLI_REQUIRES(
-        std::is_default_constructible_v<T>&& is_from_sv_parsable_v<T>)>
+        std::is_default_constructible_v<T>&& is_from_sv_parsable<T>)>
 inline void parse(std::string_view input, std::optional<T>& out)
 {
     out = T{};
     parse(input, *out);
 }
 
-template <typename T, typename>
-struct is_from_sv_parsable : std::false_type {
-};
-
 template <typename T>
-struct is_from_sv_parsable<
+inline constexpr auto is_from_sv_parsable<
     T,
     std::void_t<
-        decltype(parse(std::declval<std::string_view>(), std::declval<T&>()))>>
-    : std::true_type {
-};
+        decltype(parse(std::declval<std::string_view>(), std::declval<T&>()))>> = true;
 
 class bound_flag {
     bool* var_ptr;
@@ -205,7 +185,7 @@ class bound_value {
     std::unique_ptr<storage_base> storage_ptr;
 
    public:
-    template <typename T, LIBCLI_REQUIRES(is_from_sv_parsable_v<T>)>
+    template <typename T, LIBCLI_REQUIRES(is_from_sv_parsable<T>)>
     explicit bound_value(T& var)
         : storage_ptr{std::make_unique<storage<T>>(var)}
     {
@@ -246,7 +226,7 @@ class bound_container {
     template <
         typename T,
         LIBCLI_REQUIRES(
-            std::is_default_constructible_v<T>&& is_from_sv_parsable_v<T>)>
+            std::is_default_constructible_v<T>&& is_from_sv_parsable<T>)>
     explicit bound_container(std::vector<T>& var)
         : storage_ptr{std::make_unique<storage<T>>(var)}
     {
@@ -557,8 +537,7 @@ inline void validate_option_shorthand(std::string_view shorthand)
             "Option shorthand has to start with - and one character"};
     }
     if (std::isalpha(shorthand[1]) == 0) {
-        throw invalid_cli_definition{
-            "Option shorthand has to be alphabetic"};
+        throw invalid_cli_definition{"Option shorthand has to be alphabetic"};
     }
 }
 
@@ -579,12 +558,12 @@ inline void validate_uniqueness(
 }
 
 template <typename T>
-inline constexpr auto is_to_option_bindable_v = is_from_sv_parsable_v<T>;
+inline constexpr auto is_to_option_bindable = is_from_sv_parsable<T>;
 
 template <typename T>
-inline constexpr auto is_to_argument_bindable_v =
-    is_from_sv_parsable_v<T>  //
-    || (is_vector_v<T> && is_from_sv_parsable_v<typename T::value_type>);
+inline constexpr auto is_to_argument_bindable =
+    is_from_sv_parsable<T>  //
+    || (is_vector<T> && is_from_sv_parsable<typename T::value_type>);
 
 inline void validate_option_specification(
     std::string_view name,
@@ -603,7 +582,7 @@ class cli {
     bool has_multi_argument = false;
 
    public:
-    template <typename T, LIBCLI_REQUIRES(is_to_option_bindable_v<T>)>
+    template <typename T, LIBCLI_REQUIRES(is_to_option_bindable<T>)>
     auto add_option(T& var, std::string name, std::string shorthand = "")
         -> option_description const&
     {
@@ -612,7 +591,7 @@ class cli {
         return opts.back().desc;
     }
 
-    template <typename T, LIBCLI_REQUIRES(is_to_argument_bindable_v<T>)>
+    template <typename T, LIBCLI_REQUIRES(is_to_argument_bindable<T>)>
     void add_argument(T& var)
     {
         auto const& ref = args.emplace_back(var);
@@ -690,10 +669,10 @@ class cli {
 }  // namespace detail
 
 // concepts
-using detail::is_from_istream_readable_v;
-using detail::is_from_sv_parsable_v;
-using detail::is_to_argument_bindable_v;
-using detail::is_to_option_bindable_v;
+using detail::is_from_istream_readable;
+using detail::is_from_sv_parsable;
+using detail::is_to_argument_bindable;
+using detail::is_to_option_bindable;
 
 // exceptions
 using detail::invalid_cli_definition;
