@@ -162,32 +162,32 @@ class bound_flag {
     void assign(bool x) { *var_ptr = x; }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
+struct bound_value_storage_base {
+    virtual ~bound_value_storage_base() = default;
+    virtual void assign_parsed(std::string_view input) const = 0;
+};
+
+template <typename T>
+class bound_value_storage : public bound_value_storage_base {
+    T* var_ptr;
+
+   public:
+    explicit bound_value_storage(T& var) : var_ptr{&var} {}
+
+    void assign_parsed(std::string_view input) const final
+    {
+        parse(input, *var_ptr);
+    }
+};
+
 class bound_value {
-    // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
-    struct storage_base {
-        virtual ~storage_base() = default;
-        virtual void assign_parsed(std::string_view input) const = 0;
-    };
-
-    template <typename T>
-    class storage : public storage_base {
-        T* var_ptr;
-
-       public:
-        explicit storage(T& var) : var_ptr{&var} {}
-
-        void assign_parsed(std::string_view input) const final
-        {
-            parse(input, *var_ptr);
-        }
-    };
-
-    std::unique_ptr<storage_base> storage_ptr;
+    std::unique_ptr<bound_value_storage_base> storage_ptr;
 
    public:
     template <typename T, LIBCLI_REQUIRES(is_from_sv_parsable<T>)>
     explicit bound_value(T& var)
-        : storage_ptr{std::make_unique<storage<T>>(var)}
+        : storage_ptr{std::make_unique<bound_value_storage<T>>(var)}
     {
     }
 
@@ -197,30 +197,30 @@ class bound_value {
     }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
+struct bound_container_storage_base {
+    virtual ~bound_container_storage_base() = default;
+    virtual void push_back_parsed(std::string_view input) const = 0;
+    virtual auto size() const -> std::size_t = 0;
+};
+
+template <typename T>
+class bound_container_storage : public bound_container_storage_base {
+    std::vector<T>* var_ptr;
+
+   public:
+    explicit bound_container_storage(std::vector<T>& var) : var_ptr{&var} {}
+
+    void push_back_parsed(std::string_view input) const final
+    {
+        parse(input, var_ptr->emplace_back());
+    }
+
+    auto size() const -> std::size_t final { return var_ptr->size(); }
+};
+
 class bound_container {
-    // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
-    struct storage_base {
-        virtual ~storage_base() = default;
-        virtual void push_back_parsed(std::string_view input) const = 0;
-        virtual auto size() const -> std::size_t = 0;
-    };
-
-    template <typename T>
-    class storage : public storage_base {
-        std::vector<T>* var_ptr;
-
-       public:
-        explicit storage(std::vector<T>& var) : var_ptr{&var} {}
-
-        void push_back_parsed(std::string_view input) const final
-        {
-            parse(input, var_ptr->emplace_back());
-        }
-
-        auto size() const -> std::size_t final { return var_ptr->size(); }
-    };
-
-    std::unique_ptr<storage_base> storage_ptr;
+    std::unique_ptr<bound_container_storage_base> storage_ptr;
 
    public:
     template <
@@ -228,7 +228,7 @@ class bound_container {
         LIBCLI_REQUIRES(
             std::is_default_constructible_v<T>&& is_from_sv_parsable<T>)>
     explicit bound_container(std::vector<T>& var)
-        : storage_ptr{std::make_unique<storage<T>>(var)}
+        : storage_ptr{std::make_unique<bound_container_storage<T>>(var)}
     {
     }
 
@@ -360,21 +360,21 @@ struct flag_token {
 using token = std::variant<positional_token, option_token, flag_token>;
 
 template <
-    typename InputIt,
+    typename I,
     LIBCLI_REQUIRES((  //
         std::is_same_v<
-            typename std::iterator_traits<InputIt>::value_type,
+            typename std::iterator_traits<I>::value_type,
             std::string_view>))>
 class token_iterator_impl {
-    InputIt it;
-    InputIt end;
+    I it;
+    I end;
     std::optional<token> tok;
     std::vector<option>* opts;
     std::vector<flag_token> flags_buffer;
     bool are_options_terminated = false;
 
    public:
-    token_iterator_impl(InputIt start, InputIt end, std::vector<option>& opts)
+    token_iterator_impl(I start, I end, std::vector<option>& opts)
         : it{start}, end{end}, opts{&opts}
     {
     }
