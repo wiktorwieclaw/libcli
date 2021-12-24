@@ -41,6 +41,9 @@ inline constexpr auto is_vector = false;
 template <typename T>
 inline constexpr auto is_vector<std::vector<T>> = true;
 
+template <typename T>
+using value_type = typename T::value_type;
+
 template <typename... Ts>
 inline auto join(Ts&&... ts) -> std::string
 {
@@ -65,7 +68,7 @@ template <
     typename InputIt,
     LIBCLI_REQUIRES((  //
         std::is_convertible_v<
-            typename std::iterator_traits<InputIt>::value_type,
+            value_type<std::iterator_traits<InputIt>>,
             Converted>))>
 class convert_iterator {
     InputIt it;
@@ -126,7 +129,7 @@ inline constexpr auto is_from_istream_readable<
         decltype(std::declval<std::istream&>() >> std::declval<T&>())>> = true;
 
 template <typename T, typename = void>
-inline constexpr auto is_from_sv_parsable = false; 
+inline constexpr auto is_from_sv_parsable = false;
 
 inline void parse(std::string_view input, std::string& out) { out = input; }
 
@@ -151,8 +154,9 @@ inline void parse(std::string_view input, std::optional<T>& out)
 template <typename T>
 inline constexpr auto is_from_sv_parsable<
     T,
-    std::void_t<
-        decltype(parse(std::declval<std::string_view>(), std::declval<T&>()))>> = true;
+    std::void_t<decltype(parse(
+        std::declval<std::string_view>(),
+        std::declval<T&>()))>> = true;
 
 class bound_flag {
     bool* var_ptr;
@@ -360,21 +364,21 @@ struct flag_token {
 using token = std::variant<positional_token, option_token, flag_token>;
 
 template <
-    typename I,
+    typename InputIt,
     LIBCLI_REQUIRES((  //
         std::is_same_v<
-            typename std::iterator_traits<I>::value_type,
+            value_type<std::iterator_traits<InputIt>>,
             std::string_view>))>
 class token_iterator_impl {
-    I it;
-    I end;
+    InputIt it;
+    InputIt end;
     std::optional<token> tok;
     std::vector<option>* opts;
     std::vector<flag_token> flags_buffer;
     bool are_options_terminated = false;
 
    public:
-    token_iterator_impl(I start, I end, std::vector<option>& opts)
+    token_iterator_impl(InputIt start, InputIt end, std::vector<option>& opts)
         : it{start}, end{end}, opts{&opts}
     {
     }
@@ -563,7 +567,7 @@ inline constexpr auto is_to_option_bindable = is_from_sv_parsable<T>;
 template <typename T>
 inline constexpr auto is_to_argument_bindable =
     is_from_sv_parsable<T>  //
-    || (is_vector<T> && is_from_sv_parsable<typename T::value_type>);
+    || (is_vector<T> && is_from_sv_parsable<value_type<T>>);
 
 inline void validate_option_specification(
     std::string_view name,
