@@ -561,14 +561,6 @@ inline void validate_uniqueness(
     });
 }
 
-template <typename T>
-inline constexpr auto is_to_option_bindable = is_from_sv_parsable<T>;
-
-template <typename T>
-inline constexpr auto is_to_argument_bindable =
-    is_from_sv_parsable<T>  //
-    || (is_vector<T> && is_from_sv_parsable<value_type<T>>);
-
 inline void validate_option_specification(
     std::string_view name,
     std::string_view shorthand,
@@ -586,7 +578,7 @@ class cli {
     bool has_multi_argument = false;
 
    public:
-    template <typename T, LIBCLI_REQUIRES(is_to_option_bindable<T>)>
+    template <typename T, LIBCLI_REQUIRES(is_from_sv_parsable<T>)>
     auto add_option(T& var, std::string name, std::string shorthand = "")
         -> option_description const&
     {
@@ -595,7 +587,11 @@ class cli {
         return opts.back().desc;
     }
 
-    template <typename T, LIBCLI_REQUIRES(is_to_argument_bindable<T>)>
+    template <
+        typename T,
+        LIBCLI_REQUIRES(            //
+            is_from_sv_parsable<T>  //
+            || (is_vector<T> && is_from_sv_parsable<value_type<T>>))>
     void add_argument(T& var)
     {
         auto const& ref = args.emplace_back(var);
@@ -675,8 +671,6 @@ class cli {
 // concepts
 using detail::is_from_istream_readable;
 using detail::is_from_sv_parsable;
-using detail::is_to_argument_bindable;
-using detail::is_to_option_bindable;
 
 // exceptions
 using detail::invalid_cli_definition;
