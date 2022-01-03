@@ -124,6 +124,21 @@ TEST_CASE("parse option")
     }
 }
 
+struct S {
+    std::string str;
+};
+
+void parse(std::string_view in, S& out) { out.str = in; };
+
+TEST_CASE("adl")
+{
+    auto s = S{};
+    auto cli = libcli::cli{};
+    cli.add_option(s, "--string", "-s");
+    cli.parse({"app_name", "--string=str"});
+    REQUIRE(s.str == "str");
+}
+
 TEST_CASE("options terminator")
 {
     auto option = false;

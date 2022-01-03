@@ -3,17 +3,19 @@
 
 #include <algorithm>
 #include <cctype>
+#include <concepts>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
 
-#define LIBCLI_REQUIRES(expr) std::enable_if_t<expr, int> = 0
-
 namespace libcli {
+
 namespace detail {
 
 using namespace std::string_literals;
@@ -41,9 +43,6 @@ inline constexpr auto is_vector = false;
 template <typename T>
 inline constexpr auto is_vector<std::vector<T>> = true;
 
-template <typename T>
-using value_type = typename T::value_type;
-
 template <typename... Ts>
 inline auto join(Ts&&... ts) -> std::string
 {
@@ -63,53 +62,7 @@ class arrow_proxy {
     auto operator->() -> T* { return &t; }
 };
 
-template <
-    typename Converted,
-    typename InputIt,
-    LIBCLI_REQUIRES((  //
-        std::is_convertible_v<
-            value_type<std::iterator_traits<InputIt>>,
-            Converted>))>
-class convert_iterator {
-    InputIt it;
-
-   public:
-    using iterator_type = InputIt;
-    using iterator_category = std::input_iterator_tag;
-    using difference_type = std::ptrdiff_t;
-    using value_type = Converted;
-    using reference = Converted;
-    using pointer = arrow_proxy<Converted>;
-
-    explicit convert_iterator(InputIt it) : it{it} {}
-
-    auto operator==(convert_iterator const& other) const -> bool
-    {
-        return it == other.it;
-    }
-
-    auto operator!=(convert_iterator const& other) const -> bool
-    {
-        return !(*this == other);
-    };
-
-    auto operator++() -> convert_iterator&
-    {
-        ++it;
-        return *this;
-    }
-
-    auto operator++(int) -> convert_iterator
-    {
-        auto temp = *this;
-        ++(*this);
-        return temp;
-    }
-
-    auto operator*() const -> reference { return *it; }
-
-    auto operator->() const -> pointer { return arrow_proxy{**this}; }
-};
+}  // namespace detail
 
 struct invalid_cli_definition : public std::invalid_argument {
     using invalid_argument::invalid_argument;
@@ -119,21 +72,31 @@ struct invalid_input : public std::runtime_error {
     using runtime_error::runtime_error;
 };
 
-template <typename T, typename = void>
-inline constexpr auto is_from_istream_readable = false;
+// clang-format off
+template <typename T>
+concept from_istream_readable = requires(std::istream& is, T& x) {
+    { is >> x } -> std::convertible_to<std::istream&>;
+};;
+// clang-format on
+
+namespace detail {
 
 template <typename T>
-inline constexpr auto is_from_istream_readable<
-    T,
-    std::void_t<
-        decltype(std::declval<std::istream&>() >> std::declval<T&>())>> = true;
+struct is_from_string_view_parsable;
 
-template <typename T, typename = void>
-inline constexpr auto is_from_sv_parsable = false;
+}  // namespace detail
+
+// clang-format off
+template <typename T>
+concept from_string_view_parsable =
+    detail::is_from_string_view_parsable<T>::value;;
+// clang-format on
+
+namespace detail {
 
 inline void parse(std::string_view input, std::string& out) { out = input; }
 
-template <typename T, LIBCLI_REQUIRES(is_from_istream_readable<T>)>
+template <from_istream_readable T>
 inline void parse(std::string_view input, T& out)
 {
     auto ss = std::stringstream{};
@@ -141,22 +104,36 @@ inline void parse(std::string_view input, T& out)
     ss >> out;
 }
 
-template <
-    typename T,
-    LIBCLI_REQUIRES(
-        std::is_default_constructible_v<T>&& is_from_sv_parsable<T>)>
+template <from_string_view_parsable T>
+    requires std::default_initializable<T>
 inline void parse(std::string_view input, std::optional<T>& out)
 {
     out = T{};
     parse(input, *out);
 }
 
+// clang-format off
 template <typename T>
-inline constexpr auto is_from_sv_parsable<
-    T,
-    std::void_t<decltype(parse(
-        std::declval<std::string_view>(),
-        std::declval<T&>()))>> = true;
+struct is_from_string_view_parsable : std::bool_constant<
+    requires(std::string_view sv, T& x) {
+        { parse(sv, x) };
+    }
+> {};
+// clang-format on
+
+struct parse_fn {
+    template <from_string_view_parsable T>
+    constexpr void operator()(std::string_view input, T& out) const
+    {
+        return parse(input, out);
+    }
+};
+
+}  // namespace detail
+
+inline constexpr auto parse = detail::parse_fn{};
+
+namespace detail {
 
 class bound_flag {
     bool* var_ptr;
@@ -172,7 +149,7 @@ struct bound_value_storage_base {
     virtual void assign_parsed(std::string_view input) const = 0;
 };
 
-template <typename T>
+template <from_string_view_parsable T>
 class bound_value_storage : public bound_value_storage_base {
     T* var_ptr;
 
@@ -181,7 +158,7 @@ class bound_value_storage : public bound_value_storage_base {
 
     void assign_parsed(std::string_view input) const final
     {
-        parse(input, *var_ptr);
+        libcli::parse(input, *var_ptr);
     }
 };
 
@@ -189,7 +166,7 @@ class bound_value {
     std::unique_ptr<bound_value_storage_base> storage_ptr;
 
    public:
-    template <typename T, LIBCLI_REQUIRES(is_from_sv_parsable<T>)>
+    template <from_string_view_parsable T>
     explicit bound_value(T& var)
         : storage_ptr{std::make_unique<bound_value_storage<T>>(var)}
     {
@@ -208,7 +185,8 @@ struct bound_container_storage_base {
     virtual auto size() const -> std::size_t = 0;
 };
 
-template <typename T>
+template <from_string_view_parsable T>
+    requires std::default_initializable<T>
 class bound_container_storage : public bound_container_storage_base {
     std::vector<T>* var_ptr;
 
@@ -217,7 +195,7 @@ class bound_container_storage : public bound_container_storage_base {
 
     void push_back_parsed(std::string_view input) const final
     {
-        parse(input, var_ptr->emplace_back());
+        libcli::parse(input, var_ptr->emplace_back());
     }
 
     auto size() const -> std::size_t final { return var_ptr->size(); }
@@ -227,10 +205,8 @@ class bound_container {
     std::unique_ptr<bound_container_storage_base> storage_ptr;
 
    public:
-    template <
-        typename T,
-        LIBCLI_REQUIRES(
-            std::is_default_constructible_v<T>&& is_from_sv_parsable<T>)>
+    template <from_string_view_parsable T>
+        requires std::default_initializable<T>
     explicit bound_container(std::vector<T>& var)
         : storage_ptr{std::make_unique<bound_container_storage<T>>(var)}
     {
@@ -244,7 +220,7 @@ class bound_container {
     auto size() const -> std::size_t { return storage_ptr->size(); }
 };
 
-template <typename T>
+template <from_string_view_parsable T>
 inline auto make_bound_variable(T& var) -> bound_value
 {
     return bound_value{var};
@@ -255,11 +231,33 @@ inline auto make_bound_variable(bool& var) -> bound_flag
     return bound_flag{var};
 }
 
-template <typename T>
+template <from_string_view_parsable T>
+    requires std::default_initializable<T>
 inline auto make_bound_variable(std::vector<T>& var) -> bound_container
 {
     return bound_container{var};
 }
+
+}  // namespace detail
+
+// clang-format off
+template <typename T>
+concept to_option_argument_bindable =
+    std::same_as<T, bool> || from_string_view_parsable<T>;;
+
+template <typename T>
+concept to_positional_argument_bindable =
+    from_string_view_parsable<T>
+    || (detail::is_vector<T>
+        && std::default_initializable<std::ranges::range_value_t<T>>
+        && from_string_view_parsable<std::ranges::range_value_t<T>>);;
+
+template <typename T>
+concept to_program_argument_bindable =
+    to_positional_argument_bindable<T> || to_option_argument_bindable<T>;;
+// clang-format on
+
+namespace detail {
 
 struct option_description {
     std::string name;
@@ -273,7 +271,7 @@ struct option {
     bound_variable bound_var;
     option_description desc;
 
-    template <typename T>
+    template <to_option_argument_bindable T>
     option(std::string long_name, std::string short_name, T& var)
         : bound_var{make_bound_variable(var)},
           desc{
@@ -313,7 +311,7 @@ struct argument {
 
     bound_variable bound_var;
 
-    template <typename T>
+    template <to_positional_argument_bindable T>
     explicit argument(T& var) : bound_var{make_bound_variable(var)}
     {
     }
@@ -363,160 +361,172 @@ struct flag_token {
 
 using token = std::variant<positional_token, option_token, flag_token>;
 
-template <
-    typename InputIt,
-    LIBCLI_REQUIRES((  //
-        std::is_same_v<
-            value_type<std::iterator_traits<InputIt>>,
-            std::string_view>))>
-class token_iterator_impl {
-    InputIt it;
-    InputIt end;
-    std::optional<token> tok;
-    std::vector<option>* opts;
-    std::vector<flag_token> flags_buffer;
-    bool are_options_terminated = false;
+template <std::ranges::input_range R>
+    requires std::same_as<std::ranges::range_value_t<R>, std::string_view>
+class token_view : std::ranges::view_interface<token_view<R>> {
+    R range;
+    std::vector<option> const* opts;
 
-   public:
-    token_iterator_impl(InputIt start, InputIt end, std::vector<option>& opts)
-        : it{start}, end{end}, opts{&opts}
-    {
-    }
-
-    auto operator==(token_iterator_impl const& other) const -> bool
-    {
-        return end == other.end && it == other.it && tok == other.tok
-            && opts == other.opts && flags_buffer == other.flags_buffer
-            && are_options_terminated == other.are_options_terminated;
+    struct sentinel {
     };
 
-    auto operator!=(token_iterator_impl const& other) const -> bool
-    {
-        return !(*this == other);
-    };
+    class iterator_impl {
+        token_view* parent;
+        std::ranges::iterator_t<R> it;
+        std::optional<token> tok;
+        std::vector<flag_token> flags_buffer;
+        bool are_options_terminated = false;
 
-    auto init() -> bool
-    {
-        if (it == end) { return false; }
-        tok = make_token();
-        ++it;
-        return true;
-    }
+       public:
+        iterator_impl(token_view* parent, std::ranges::iterator_t<R> cursor)
+            : parent{parent}, it{cursor}
+        {
+        }
 
-    auto get() -> token const& { return *tok; }
+        auto operator==(iterator_impl const& other) const -> bool
+        {
+            return parent == other.parent && tok == other.tok
+                && flags_buffer == other.flags_buffer
+                && are_options_terminated == other.are_options_terminated;
+        };
 
-    auto next() -> bool
-    {
-        if (!flags_buffer.empty()) {
-            tok = flags_buffer.back();
-            flags_buffer.pop_back();
+        auto operator!=(iterator_impl const& other) const -> bool
+        {
+            return !(*this == other);
+        };
+
+        auto init() -> bool
+        {
+            if (it == std::ranges::end(parent->range)) { return false; }
+            tok = make_token();
+            ++it;
             return true;
         }
-        if (it == end) { return false; }
-        if (*it == "--") {
-            are_options_terminated = true;
-            if (++it == end) { return false; }
-        }
-        tok = make_token();
-        ++it;
-        return true;
-    }
 
-   private:
-    auto make_token() -> detail::token
-    {
-        if ((*it)[0] != '-' || are_options_terminated) {
-            return positional_token{*it};
+        auto get() -> token const& { return *tok; }
+
+        auto next() -> bool
+        {
+            if (!flags_buffer.empty()) {
+                tok = flags_buffer.back();
+                flags_buffer.pop_back();
+                return true;
+            }
+            if (it == std::ranges::end(parent->range)) { return false; }
+            if (*it == "--") {
+                are_options_terminated = true;
+                if (++it == std::ranges::end(parent->range)) { return false; }
+            }
+            tok = make_token();
+            ++it;
+            return true;
         }
-        if ((*it)[1] != '-') {
-            if (it->length() > 2) {
-                auto const name = it->substr(0, 2);
-                auto const value = it->substr(2);
-                auto const [desc, idx] = match(name, *opts);
-                if (!desc->is_flag) { return option_token{name, value, idx}; }
-                std::for_each(value.rbegin(), value.rend(), [&](auto f) {
-                    auto name = "- "s;
-                    name[1] = f;
-                    auto const idx_ = match(name, *opts).idx;
-                    flags_buffer.emplace_back(name, idx_);
-                });
-                return flag_token{name, idx};
+
+       private:
+        auto make_token() -> detail::token
+        {
+            if ((*it)[0] != '-' || are_options_terminated) {
+                return positional_token{*it};
+            }
+            if ((*it)[1] != '-') {
+                if (it->length() > 2) {
+                    auto const name = it->substr(0, 2);
+                    auto const value = it->substr(2);
+                    auto const [desc, idx] = match(name, *parent->opts);
+                    if (!desc->is_flag) {
+                        return option_token{name, value, idx};
+                    }
+                    std::for_each(value.rbegin(), value.rend(), [&](auto f) {
+                        auto name = "- "s;
+                        name[1] = f;
+                        auto const idx_ = match(name, *parent->opts).idx;
+                        flags_buffer.emplace_back(name, idx_);
+                    });
+                    return flag_token{name, idx};
+                }
+            }
+            else if (auto const pos = it->find('=');
+                     pos != std::string_view::npos) {
+                auto const name = it->substr(0, pos);
+                auto const value = it->substr(pos + 1);
+                auto const [desc, idx] = match(name, *parent->opts);
+                if (desc->is_flag) {
+                    throw invalid_input{join(*it, " is invalid")};
+                }
+                return option_token{name, value, idx};
+            }
+            auto const [desc, idx] = match(*it, *parent->opts);
+            if (desc->is_flag) { return flag_token{*it, idx}; }
+            auto const name = *it;
+            if (++it == std::ranges::end(parent->range)) {
+                throw invalid_input{join(name, " is missing an argument")};
+            }
+            return option_token{name, *it, idx};
+        }
+    };
+
+    class iterator {
+        std::shared_ptr<iterator_impl> pimpl;
+
+       public:
+        using iterator_category = std::input_iterator_tag;
+        using difference_type = std::ptrdiff_t;
+        using value_type = token;
+        using reference = token const&;
+        using pointer = token const*;
+
+        iterator() = default;
+
+        iterator(token_view* parent, std::ranges::iterator_t<R> cursor)
+            : pimpl{std::make_shared<iterator_impl>(parent, cursor)}
+        {
+            if (!pimpl->init()) { pimpl.reset(); }
+        }
+
+        auto operator++() -> iterator&
+        {
+            copy_on_write();
+            if (!pimpl->next()) { pimpl.reset(); }
+            return *this;
+        }
+
+        auto operator++(int) -> token
+        {
+            auto temp = *this;
+            ++(*this);
+            return temp;
+        }
+
+        auto operator*() const -> reference { return pimpl->get(); }
+
+        auto operator->() const -> pointer { return &**this; }
+
+        friend auto operator==(iterator const& lhs, iterator const& rhs) -> bool
+        {
+            if (lhs.pimpl == nullptr || rhs.pimpl == nullptr) {
+                return lhs.pimpl == rhs.pimpl;
+            }
+            return *lhs.pimpl == *rhs.pimpl;
+        }
+
+       private:
+        void copy_on_write()
+        {
+            if (pimpl != nullptr && pimpl.use_count() > 1) {
+                pimpl = std::make_shared<iterator_impl>(*pimpl);
             }
         }
-        else if (auto const pos = it->find('=');
-                 pos != std::string_view::npos) {
-            auto const name = it->substr(0, pos);
-            auto const value = it->substr(pos + 1);
-            auto const [desc, idx] = match(name, *opts);
-            if (desc->is_flag) {
-                throw invalid_input{join(*it, " is invalid")};
-            }
-            return option_token{name, value, idx};
-        }
-        auto const [desc, idx] = match(*it, *opts);
-        if (desc->is_flag) { return flag_token{*it, idx}; }
-        auto const name = *it;
-        if (++it == end) {
-            throw invalid_input{join(name, " is missing an argument")};
-        }
-        return option_token{name, *it, idx};
-    }
-};
-
-template <typename InputIt>
-class token_iterator {
-    using impl = token_iterator_impl<InputIt>;
-
-    std::shared_ptr<impl> pimpl;
+    };
 
    public:
-    using iterator_category = std::input_iterator_tag;
-    using difference_type = std::ptrdiff_t;
-    using value_type = token;
-    using reference = token const&;
-    using pointer = token const*;
-
-    token_iterator() = default;
-
-    token_iterator(InputIt start, InputIt end, std::vector<option>& opts)
-        : pimpl{std::make_shared<impl>(start, end, opts)}
+    token_view(R range, std::vector<option> const& opts)
+        : range{std::move(range)}, opts{&opts}
     {
-        if (!pimpl->init()) { pimpl.reset(); }
     }
 
-    auto operator++() -> token_iterator&
-    {
-        copy_on_write();
-        if (!pimpl->next()) { pimpl.reset(); }
-        return *this;
-    }
+    auto begin() { return iterator{this, std::ranges::begin(range)}; }
 
-    auto operator*() const -> reference { return pimpl->get(); }
-
-    auto operator->() const -> pointer { return &**this; }
-
-    friend auto operator==(token_iterator const& lhs, token_iterator const& rhs)
-        -> bool
-    {
-        if (lhs.pimpl == nullptr || rhs.pimpl == nullptr) {
-            return lhs.pimpl == rhs.pimpl;
-        }
-        return *lhs.pimpl == *rhs.pimpl;
-    }
-
-    friend auto operator!=(token_iterator const& lhs, token_iterator const& rhs)
-        -> bool
-    {
-        return !(lhs == rhs);
-    }
-
-   private:
-    void copy_on_write()
-    {
-        if (pimpl != nullptr && pimpl.use_count() > 1) {
-            pimpl = std::make_shared<impl>(*pimpl);
-        }
-    }
+    auto end() { return iterator{}; }
 };
 
 inline void validate_option_name(std::string_view name)
@@ -571,31 +581,29 @@ inline void validate_option_specification(
     validate_uniqueness(name, shorthand, opts);
 }
 
+}  // namespace detail
+
 class cli {
     std::string program_name;
-    std::vector<option> opts;
-    std::vector<argument> args;
+    std::vector<detail::option> opts;
+    std::vector<detail::argument> args;
     bool has_multi_argument = false;
 
    public:
-    template <typename T, LIBCLI_REQUIRES(is_from_sv_parsable<T>)>
+    template <to_option_argument_bindable T>
     auto add_option(T& var, std::string name, std::string shorthand = "")
-        -> option_description const&
+        -> detail::option_description const&
     {
         validate_option_specification(name, shorthand, opts);
         opts.emplace_back(std::move(name), std::move(shorthand), var);
         return opts.back().desc;
     }
 
-    template <
-        typename T,
-        LIBCLI_REQUIRES(            //
-            is_from_sv_parsable<T>  //
-            || (is_vector<T> && is_from_sv_parsable<value_type<T>>))>
+    template <to_positional_argument_bindable T>
     void add_argument(T& var)
     {
         auto const& ref = args.emplace_back(var);
-        if (std::holds_alternative<bound_container>(ref.bound_var)) {
+        if (std::holds_alternative<detail::bound_container>(ref.bound_var)) {
             if (has_multi_argument) {
                 throw invalid_cli_definition{
                     "There cannot be more than one multi-argument"};
@@ -609,7 +617,12 @@ class cli {
     {
         if (argc <= 0) { throw std::logic_error{"Input cannot be empty"}; }
         program_name = argv[0];
-        auto unmatched = parse_options(argv + 1, argv + argc);
+        using namespace std::ranges;
+        auto const args_view =
+            subrange{argv + 1, argv + argc}
+            | views::transform([](auto x) { return std::string_view{x}; });
+        auto const args = std::vector(args_view.begin(), args_view.end());
+        auto unmatched = parse_options(detail::token_view{args, opts});
         parse_positional_arguments(unmatched);
     }
 
@@ -619,34 +632,36 @@ class cli {
     }
 
    private:
-    auto parse_options(char const* const* start, char const* const* end)
-        -> std::vector<positional_token>
+    template <std::ranges::input_range R>
+    auto parse_options(R&& range) -> std::vector<detail::positional_token>
     {
-        auto unmatched = std::vector<positional_token>{};
-        auto token_visitor = overloaded{
-            [&](positional_token const& tok) { unmatched.push_back(tok); },
-            [&](flag_token const& tok) { opts[tok.idx].write(true); },
-            [&](option_token const& tok) {
+        auto unmatched = std::vector<detail::positional_token>{};
+        auto token_visitor = detail::overloaded{
+            [&](detail::positional_token const& tok) {
+                unmatched.push_back(tok);
+            },
+            [&](detail::flag_token const& tok) { opts[tok.idx].write(true); },
+            [&](detail::option_token const& tok) {
                 opts[tok.idx].write_parsed(tok.value);
             }};
-        using iterator = convert_iterator<std::string_view, decltype(start)>;
         visit_each(
-            token_iterator{iterator{start}, iterator{end}, opts},
-            token_iterator<iterator>{},
+            std::ranges::begin(range),
+            std::ranges::end(range),
             token_visitor);
         return unmatched;
     }
 
-    void parse_positional_arguments(std::vector<positional_token> const& tokens)
+    void parse_positional_arguments(
+        std::vector<detail::positional_token> const& tokens)
     {
         auto token_it = tokens.begin();
         auto arg_it = args.begin();
-        auto bound_variable_visitor = overloaded{
-            [&](bound_value& value) {
+        auto bound_variable_visitor = detail::overloaded{
+            [&](detail::bound_value& value) {
                 value.assign_parsed(token_it->value);
                 ++token_it;
             },
-            [&](bound_container& container) {
+            [&](detail::bound_container& container) {
                 auto const num_args_left = args.end() - (arg_it + 1);
                 auto const limit = tokens.end() - num_args_left;
                 if (token_it > limit) {
@@ -666,19 +681,6 @@ class cli {
         }
     }
 };
-}  // namespace detail
-
-// concepts
-using detail::is_from_istream_readable;
-using detail::is_from_sv_parsable;
-
-// exceptions
-using detail::invalid_cli_definition;
-using detail::invalid_input;
-
-// parsing
-using detail::cli;
-using detail::parse;
 
 }  // namespace libcli
 
