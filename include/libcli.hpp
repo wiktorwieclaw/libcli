@@ -28,13 +28,20 @@ struct overloaded : Ts... {
 template <typename... Ts>
 overloaded(Ts...) -> overloaded<Ts...>;
 
-template <typename InputIt, typename Visitor>
-inline void visit_each(InputIt first, InputIt limit, Visitor&& v)
+// todo visitor concept
+template <std::input_iterator I, typename V>
+inline void visit_each(I first, I last, V&& v)
 {
-    while (first != limit) {
-        std::visit(std::forward<Visitor>(v), *first);
+    while (first != last) {
+        std::visit(v, *first);
         ++first;
     }
+};
+
+template <std::ranges::input_range R, typename V>
+inline void visit_each(R&& range, V&& v)
+{
+    visit_each(std::ranges::begin(range), std::ranges::end(range), v);
 };
 
 template <typename T>
@@ -367,9 +374,6 @@ class token_view : std::ranges::view_interface<token_view<R>> {
     R range;
     std::vector<option> const* opts;
 
-    struct sentinel {
-    };
-
     class iterator_impl {
         token_view* parent;
         std::ranges::iterator_t<R> it;
@@ -644,10 +648,7 @@ class cli {
             [&](detail::option_token const& tok) {
                 opts[tok.idx].write_parsed(tok.value);
             }};
-        visit_each(
-            std::ranges::begin(range),
-            std::ranges::end(range),
-            token_visitor);
+        visit_each(range, token_visitor);
         return unmatched;
     }
 
