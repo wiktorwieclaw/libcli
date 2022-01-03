@@ -29,20 +29,20 @@ template <typename... Ts>
 overloaded(Ts...) -> overloaded<Ts...>;
 
 // todo visitor concept
-template <std::input_iterator I, typename V>
-inline void visit_each(I first, I last, V&& v)
+template <std::input_iterator I, std::sentinel_for<I> S, typename V>
+inline void visit_each(I first, S last, V&& v)
 {
     while (first != last) {
         std::visit(v, *first);
         ++first;
     }
-};
+}
 
 template <std::ranges::input_range R, typename V>
 inline void visit_each(R&& range, V&& v)
 {
     visit_each(std::ranges::begin(range), std::ranges::end(range), v);
-};
+}
 
 template <typename T>
 inline constexpr auto is_vector = false;
@@ -266,26 +266,24 @@ concept to_program_argument_bindable =
 
 namespace detail {
 
-struct option_description {
-    std::string name;
-    std::string shorthand;
-    bool is_flag;
-};
-
 struct option {
     using bound_variable = std::variant<bound_flag, bound_value>;
 
     bound_variable bound_var;
-    option_description desc;
+    std::string name;
+    std::string shorthand;
 
     template <to_option_argument_bindable T>
     option(std::string long_name, std::string short_name, T& var)
         : bound_var{make_bound_variable(var)},
-          desc{
-              std::move(long_name),
-              std::move(short_name),
-              std::holds_alternative<bound_flag>(bound_var)}
+          name{std::move(long_name)},
+          shorthand{std::move(short_name)}
     {
+    }
+
+    auto is_flag() const -> bool
+    {
+        return std::holds_alternative<bound_flag>(bound_var);
     }
 
     void write_parsed(std::string_view str)
@@ -295,23 +293,6 @@ struct option {
 
     void write(bool value) { std::get<bound_flag>(bound_var).assign(value); }
 };
-
-struct match_result {
-    option_description const* desc;
-    std::size_t idx;
-};
-
-auto match(std::string_view str, std::vector<option> const& opts)
-    -> match_result
-{
-    auto const it = std::find_if(opts.begin(), opts.end(), [&](auto const& o) {
-        return o.desc.shorthand == str || o.desc.name == str;
-    });
-    if (it == opts.end()) {
-        throw invalid_input{join(str, " is not an option")};
-    }
-    return {&it->desc, static_cast<size_t>(it - opts.begin())};
-}
 
 struct argument {
     using bound_variable = std::variant<bound_value, bound_container>;
@@ -338,10 +319,10 @@ struct positional_token {
 struct option_token {
     std::string name;
     std::string value;
-    std::size_t idx;
+    std::size_t option_idx;
 
     option_token(std::string_view name, std::string_view value, std::size_t idx)
-        : name{name}, value{value}, idx{idx}
+        : name{name}, value{value}, option_idx{idx}
     {
     }
 
@@ -353,10 +334,10 @@ struct option_token {
 
 struct flag_token {
     std::string name;
-    std::size_t idx;
+    std::size_t flag_idx;
 
     explicit flag_token(std::string_view name, std::size_t idx)
-        : name{name}, idx{idx}
+        : name{name}, flag_idx{idx}
     {
     }
 
@@ -370,102 +351,152 @@ using token = std::variant<positional_token, option_token, flag_token>;
 
 template <std::ranges::input_range R>
     requires std::same_as<std::ranges::range_value_t<R>, std::string_view>
-class token_view : std::ranges::view_interface<token_view<R>> {
-    R range;
-    std::vector<option> const* opts;
+class program_argument_token_view
+    : std::ranges::view_interface<program_argument_token_view<R>>  //
+{
+    struct sentinel {
+    };
 
     class iterator_impl {
-        token_view* parent;
-        std::ranges::iterator_t<R> it;
+        program_argument_token_view* parent;
+        std::ranges::iterator_t<R> current;
         std::optional<token> tok;
         std::vector<flag_token> flags_buffer;
         bool are_options_terminated = false;
 
        public:
-        iterator_impl(token_view* parent, std::ranges::iterator_t<R> cursor)
-            : parent{parent}, it{cursor}
+        iterator_impl(
+            program_argument_token_view* parent,
+            std::ranges::iterator_t<R> cursor)
+            : parent{parent}, current{cursor}
         {
+            next();
         }
 
-        auto operator==(iterator_impl const& other) const -> bool
-        {
-            return parent == other.parent && tok == other.tok
-                && flags_buffer == other.flags_buffer
-                && are_options_terminated == other.are_options_terminated;
-        };
-
-        auto operator!=(iterator_impl const& other) const -> bool
-        {
-            return !(*this == other);
-        };
-
-        auto init() -> bool
-        {
-            if (it == std::ranges::end(parent->range)) { return false; }
-            tok = make_token();
-            ++it;
-            return true;
-        }
-
-        auto get() -> token const& { return *tok; }
-
-        auto next() -> bool
+        void next()
         {
             if (!flags_buffer.empty()) {
                 tok = flags_buffer.back();
                 flags_buffer.pop_back();
-                return true;
+                return;
             }
-            if (it == std::ranges::end(parent->range)) { return false; }
-            if (*it == "--") {
+            if (current == std::ranges::end(parent->range)) {
+                tok.reset();
+                return;
+            }
+            if (*current == "--") {
                 are_options_terminated = true;
-                if (++it == std::ranges::end(parent->range)) { return false; }
+                ++current;
+                if (current == std::ranges::end(parent->range)) {
+                    tok.reset();
+                    return;
+                }
             }
-            tok = make_token();
-            ++it;
-            return true;
+            make_next();
+            ++current;
         }
 
+        auto has_value() const -> bool { return tok.has_value(); }
+
+        auto value() const -> token const& { return *tok; }
+
        private:
-        auto make_token() -> detail::token
+        struct match_option_result {
+            bool is_flag;
+            std::size_t idx;
+        };
+
+        auto match_option(std::string_view str) -> match_option_result
         {
-            if ((*it)[0] != '-' || are_options_terminated) {
-                return positional_token{*it};
+            auto const it =
+                std::ranges::find_if(*parent->opts, [&](auto const& o) {
+                    return o.shorthand == str || o.name == str;
+                });
+            if (it == parent->opts->end()) {
+                throw invalid_input{join(str, " is not an option")};
             }
-            if ((*it)[1] != '-') {
-                if (it->length() > 2) {
-                    auto const name = it->substr(0, 2);
-                    auto const value = it->substr(2);
-                    auto const [desc, idx] = match(name, *parent->opts);
-                    if (!desc->is_flag) {
-                        return option_token{name, value, idx};
+            return {
+                it->is_flag(),
+                static_cast<std::size_t>(it - parent->opts->begin())};
+        }
+
+        void make_next()
+        {
+            if ((*current)[0] != '-' || are_options_terminated) {
+                tok = positional_token{*current};
+            }
+            else if ((*current)[1] != '-') {
+                process_single_dash_string();
+            }
+            else {
+                process_double_dash_string();
+            }
+        }
+
+        void process_single_dash_string()
+        {
+            if (current->length() > 2) {
+                auto const name = current->substr(0, 2);
+                auto const [is_flag, idx] = match_option(name);
+                if (is_flag) { process_adjacent_flags(idx); }
+                else {
+                    auto const value = current->substr(2);
+                    tok = option_token{name, value, idx};
+                }
+            }
+            else {
+                process_regular_option();
+            }
+        }
+
+        void process_double_dash_string()
+        {
+            auto const pos = current->find('=');
+            if (pos != std::string_view::npos) {
+                process_option_with_equal_sign(pos);
+            }
+            else {
+                process_regular_option();
+            }
+        }
+
+        void process_option_with_equal_sign(std::size_t pos)
+        {
+            auto const name = current->substr(0, pos);
+            auto const value = current->substr(pos + 1);
+            auto const [is_flag, idx] = match_option(name);
+            if (is_flag) { throw invalid_input{join(*current, " is invalid")}; }
+            tok = option_token{name, value, idx};
+        }
+
+        void process_regular_option()
+        {
+            auto const [is_flag, idx] = match_option(*current);
+            if (is_flag) { tok = flag_token{*current, idx}; }
+            else {
+                auto const name = *current;
+                if (++current == std::ranges::end(parent->range)) {
+                    throw invalid_input{join(name, " is missing an argument")};
+                }
+                tok = option_token{name, *current, idx};
+            }
+        }
+
+        void process_adjacent_flags(std::size_t idx)
+        {
+            std::ranges::for_each(
+                current->rbegin(),
+                current->rend() - 1,
+                [&](auto f) {
+                    auto name = "- "s;
+                    name[1] = f;
+                    auto const [is_flag, idx_] = match_option(name);
+                    if (!is_flag) {
+                        throw invalid_input{join(name, " is not a flag")};
                     }
-                    std::for_each(value.rbegin(), value.rend(), [&](auto f) {
-                        auto name = "- "s;
-                        name[1] = f;
-                        auto const idx_ = match(name, *parent->opts).idx;
-                        flags_buffer.emplace_back(name, idx_);
-                    });
-                    return flag_token{name, idx};
-                }
-            }
-            else if (auto const pos = it->find('=');
-                     pos != std::string_view::npos) {
-                auto const name = it->substr(0, pos);
-                auto const value = it->substr(pos + 1);
-                auto const [desc, idx] = match(name, *parent->opts);
-                if (desc->is_flag) {
-                    throw invalid_input{join(*it, " is invalid")};
-                }
-                return option_token{name, value, idx};
-            }
-            auto const [desc, idx] = match(*it, *parent->opts);
-            if (desc->is_flag) { return flag_token{*it, idx}; }
-            auto const name = *it;
-            if (++it == std::ranges::end(parent->range)) {
-                throw invalid_input{join(name, " is missing an argument")};
-            }
-            return option_token{name, *it, idx};
+                    flags_buffer.emplace_back(name, idx_);
+                });
+            tok = flag_token{current->substr(2), idx};
         }
     };
 
@@ -481,56 +512,57 @@ class token_view : std::ranges::view_interface<token_view<R>> {
 
         iterator() = default;
 
-        iterator(token_view* parent, std::ranges::iterator_t<R> cursor)
+        iterator(
+            program_argument_token_view* parent,
+            std::ranges::iterator_t<R> cursor)
             : pimpl{std::make_shared<iterator_impl>(parent, cursor)}
         {
-            if (!pimpl->init()) { pimpl.reset(); }
         }
 
         auto operator++() -> iterator&
         {
-            copy_on_write();
-            if (!pimpl->next()) { pimpl.reset(); }
+            cow();
+            pimpl->next();
             return *this;
         }
 
-        auto operator++(int) -> token
+        auto operator++(int) -> iterator
         {
             auto temp = *this;
             ++(*this);
             return temp;
         }
 
-        auto operator*() const -> reference { return pimpl->get(); }
+        auto operator*() const -> reference { return pimpl->value(); }
 
         auto operator->() const -> pointer { return &**this; }
 
-        friend auto operator==(iterator const& lhs, iterator const& rhs) -> bool
+        friend auto operator==(iterator const& it, sentinel const&) -> bool
         {
-            if (lhs.pimpl == nullptr || rhs.pimpl == nullptr) {
-                return lhs.pimpl == rhs.pimpl;
-            }
-            return *lhs.pimpl == *rhs.pimpl;
+            return !it.pimpl->has_value();
         }
 
        private:
-        void copy_on_write()
+        void cow()
         {
-            if (pimpl != nullptr && pimpl.use_count() > 1) {
+            if (pimpl.use_count() > 1) {
                 pimpl = std::make_shared<iterator_impl>(*pimpl);
             }
         }
     };
 
+    R range;
+    std::vector<option> const* opts;
+
    public:
-    token_view(R range, std::vector<option> const& opts)
+    program_argument_token_view(R range, std::vector<option> const& opts)
         : range{std::move(range)}, opts{&opts}
     {
     }
 
     auto begin() { return iterator{this, std::ranges::begin(range)}; }
 
-    auto end() { return iterator{}; }
+    auto end() { return sentinel{}; }
 };
 
 inline void validate_option_name(std::string_view name)
@@ -565,10 +597,10 @@ inline void validate_uniqueness(
     std::vector<option> const& opts)
 {
     std::for_each(opts.begin(), opts.end(), [&](auto const& o) {
-        if (o.desc.name == name) {
+        if (o.name == name) {
             throw invalid_cli_definition{join(name, " is already defined")};
         }
-        if (o.desc.shorthand == shorthand) {
+        if (o.shorthand == shorthand) {
             throw invalid_cli_definition{
                 join(shorthand, " is already defined")};
         }
@@ -588,7 +620,6 @@ inline void validate_option_specification(
 }  // namespace detail
 
 class cli {
-    std::string program_name;
     std::vector<detail::option> opts;
     std::vector<detail::argument> args;
     bool has_multi_argument = false;
@@ -596,11 +627,9 @@ class cli {
    public:
     template <to_option_argument_bindable T>
     auto add_option(T& var, std::string name, std::string shorthand = "")
-        -> detail::option_description const&
     {
         validate_option_specification(name, shorthand, opts);
         opts.emplace_back(std::move(name), std::move(shorthand), var);
-        return opts.back().desc;
     }
 
     template <to_positional_argument_bindable T>
@@ -619,14 +648,14 @@ class cli {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
     void parse(int argc, char const* const* argv)
     {
-        if (argc <= 0) { throw std::logic_error{"Input cannot be empty"}; }
-        program_name = argv[0];
         using namespace std::ranges;
+        if (argc <= 0) { throw std::logic_error{"Input cannot be empty"}; }
         auto const args_view =
             subrange{argv + 1, argv + argc}
             | views::transform([](auto x) { return std::string_view{x}; });
         auto const args = std::vector(args_view.begin(), args_view.end());
-        auto unmatched = parse_options(detail::token_view{args, opts});
+        auto unmatched =
+            parse_options(detail::program_argument_token_view{args, opts});
         parse_positional_arguments(unmatched);
     }
 
@@ -644,9 +673,11 @@ class cli {
             [&](detail::positional_token const& tok) {
                 unmatched.push_back(tok);
             },
-            [&](detail::flag_token const& tok) { opts[tok.idx].write(true); },
+            [&](detail::flag_token const& tok) {
+                opts[tok.flag_idx].write(true);
+            },
             [&](detail::option_token const& tok) {
-                opts[tok.idx].write_parsed(tok.value);
+                opts[tok.option_idx].write_parsed(tok.value);
             }};
         visit_each(range, token_visitor);
         return unmatched;
