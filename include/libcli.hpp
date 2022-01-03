@@ -666,6 +666,7 @@ class cli {
 
    private:
     template <std::ranges::input_range R>
+        requires std::same_as<std::ranges::range_value_t<R>, detail::token>
     auto parse_options(R&& range) -> std::vector<detail::positional_token>
     {
         auto unmatched = std::vector<detail::positional_token>{};
