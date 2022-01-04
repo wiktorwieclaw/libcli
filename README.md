@@ -8,15 +8,14 @@ struct WindowSettings {
 enum class Scenery { Plains, Forest };
 
 // enables Scenery objects to bind to libcli::cli
-void parse(std::string_view in, Scenery& out) {
-    const auto lc_in = to_lowercase(in);
-    if (lc_in == "plains") { out = Scenery::Plains; }
-    else if (lc_in == "forest") { out = Scenery::Forest; }
-    else {
-        throw libcli::invalid_program_arguments{
-            std::string{in} + "is not a valid scenario"s
-        };
-    }
+std::istream& operator>>(std::istream& is, Scenery& out) {
+    std::string str;
+    is >> str;
+    const auto lc = to_lowercase(str);
+    if (lc == "plains") { out = Scenery::Plains; }
+    else if (lc == "forest") { out = Scenery::Forest; }
+    else { is.setstate(std::ios_base::failbit); }
+    return is;
 }
 
 int main(int argc, char** argv) {

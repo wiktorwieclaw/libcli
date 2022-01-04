@@ -50,6 +50,12 @@ inline constexpr auto is_vector = false;
 template <typename T>
 inline constexpr auto is_vector<std::vector<T>> = true;
 
+template <typename T>
+inline constexpr auto is_optional = false;
+
+template <typename T>
+inline constexpr auto is_optional<std::optional<T>> = true;
+
 template <typename... Ts>
 inline auto join(Ts&&... ts) -> std::string
 {
@@ -65,7 +71,7 @@ struct invalid_cli_definition : public std::invalid_argument {
     using invalid_argument::invalid_argument;
 };
 
-struct invalid_input : public std::runtime_error {
+struct invalid_program_argument : public std::runtime_error {
     using runtime_error::runtime_error;
 };
 
@@ -74,19 +80,13 @@ template <typename T>
 concept from_istream_readable = requires(std::istream& is, T& x) {
     { is >> x } -> std::convertible_to<std::istream&>;
 };;
-// clang-format on
-
-namespace detail {
 
 template <typename T>
-struct is_from_string_view_parsable;
-
-}  // namespace detail
-
-// clang-format off
-template <typename T>
-concept from_string_view_parsable =
-    detail::is_from_string_view_parsable<T>::value;;
+concept from_string_parsable =
+    from_istream_readable<T>
+    || (detail::is_optional<T>
+        && std::default_initializable<typename T::value_type>
+        && from_istream_readable<typename T::value_type>);;
 // clang-format on
 
 namespace detail {
@@ -99,38 +99,18 @@ inline void parse(std::string_view input, T& out)
     auto ss = std::stringstream{};
     ss << input;
     ss >> out;
+    if (ss.fail()) {
+        throw invalid_program_argument(join(input, " is not a valid value"));
+    }
 }
 
-template <from_string_view_parsable T>
+template <from_istream_readable T>
     requires std::default_initializable<T>
 inline void parse(std::string_view input, std::optional<T>& out)
 {
     out = T{};
     parse(input, *out);
 }
-
-// clang-format off
-template <typename T>
-struct is_from_string_view_parsable : std::bool_constant<
-    requires(std::string_view sv, T& x) {
-        { parse(sv, x) };
-    }
-> {};
-// clang-format on
-
-struct parse_fn {
-    template <from_string_view_parsable T>
-    constexpr void operator()(std::string_view input, T& out) const
-    {
-        return parse(input, out);
-    }
-};
-
-}  // namespace detail
-
-inline constexpr auto parse = detail::parse_fn{};
-
-namespace detail {
 
 class bound_flag {
     bool* var_ptr;
@@ -146,7 +126,7 @@ struct bound_value_storage_base {
     virtual void assign_parsed(std::string_view input) const = 0;
 };
 
-template <from_string_view_parsable T>
+template <from_string_parsable T>
 class bound_value_storage : public bound_value_storage_base {
     T* var_ptr;
 
@@ -155,7 +135,7 @@ class bound_value_storage : public bound_value_storage_base {
 
     void assign_parsed(std::string_view input) const final
     {
-        libcli::parse(input, *var_ptr);
+        parse(input, *var_ptr);
     }
 };
 
@@ -163,7 +143,7 @@ class bound_value {
     std::unique_ptr<bound_value_storage_base> storage_ptr;
 
    public:
-    template <from_string_view_parsable T>
+    template <from_string_parsable T>
     explicit bound_value(T& var)
         : storage_ptr{std::make_unique<bound_value_storage<T>>(var)}
     {
@@ -182,7 +162,7 @@ struct bound_container_storage_base {
     virtual auto size() const -> std::size_t = 0;
 };
 
-template <from_string_view_parsable T>
+template <from_string_parsable T>
     requires std::default_initializable<T>
 class bound_container_storage : public bound_container_storage_base {
     std::vector<T>* var_ptr;
@@ -192,7 +172,7 @@ class bound_container_storage : public bound_container_storage_base {
 
     void push_back_parsed(std::string_view input) const final
     {
-        libcli::parse(input, var_ptr->emplace_back());
+        parse(input, var_ptr->emplace_back());
     }
 
     auto size() const -> std::size_t final { return var_ptr->size(); }
@@ -202,7 +182,7 @@ class bound_container {
     std::unique_ptr<bound_container_storage_base> storage_ptr;
 
    public:
-    template <from_string_view_parsable T>
+    template <from_string_parsable T>
         requires std::default_initializable<T>
     explicit bound_container(std::vector<T>& var)
         : storage_ptr{std::make_unique<bound_container_storage<T>>(var)}
@@ -217,7 +197,7 @@ class bound_container {
     auto size() const -> std::size_t { return storage_ptr->size(); }
 };
 
-template <from_string_view_parsable T>
+template <from_string_parsable T>
 inline auto make_bound_variable(T& var) -> bound_value
 {
     return bound_value{var};
@@ -228,7 +208,7 @@ inline auto make_bound_variable(bool& var) -> bound_flag
     return bound_flag{var};
 }
 
-template <from_string_view_parsable T>
+template <from_string_parsable T>
     requires std::default_initializable<T>
 inline auto make_bound_variable(std::vector<T>& var) -> bound_container
 {
@@ -237,21 +217,12 @@ inline auto make_bound_variable(std::vector<T>& var) -> bound_container
 
 }  // namespace detail
 
-// clang-format off
 template <typename T>
-concept to_option_argument_bindable =
-    std::same_as<T, bool> || from_string_view_parsable<T>;;
-
-template <typename T>
-concept to_positional_argument_bindable =
-    from_string_view_parsable<T>
-    || (detail::is_vector<T>
-        && std::default_initializable<std::ranges::range_value_t<T>>
-        && from_string_view_parsable<std::ranges::range_value_t<T>>);;
-
-template <typename T>
-concept to_program_argument_bindable =
-    to_positional_argument_bindable<T> || to_option_argument_bindable<T>;;
+concept to_positional_argument_bindable = from_string_parsable<T> ||(
+    detail::is_vector<T>&&
+        std::default_initializable<std::ranges::range_value_t<T>>&&
+            from_string_parsable<std::ranges::range_value_t<T>>);
+;
 // clang-format on
 
 namespace detail {
@@ -263,7 +234,7 @@ struct option {
     std::string name;
     std::string shorthand;
 
-    template <to_option_argument_bindable T>
+    template <from_string_parsable T>
     option(std::string long_name, std::string short_name, T& var)
         : bound_var{make_bound_variable(var)},
           name{std::move(long_name)},
@@ -376,7 +347,7 @@ class program_argument_token_view
                     return o.shorthand == str || o.name == str;
                 });
             if (it == parent->opts->end()) {
-                throw invalid_input{join(str, " is not an option")};
+                throw invalid_program_argument{join(str, " is not an option")};
             }
             return {
                 it->is_flag(),
@@ -428,7 +399,9 @@ class program_argument_token_view
             auto const name = current->substr(0, pos);
             auto const value = current->substr(pos + 1);
             auto const [is_flag, idx] = match_option(name);
-            if (is_flag) { throw invalid_input{join(*current, " is invalid")}; }
+            if (is_flag) {
+                throw invalid_program_argument{join(*current, " is invalid")};
+            }
             tok = option_token{name, value, idx};
         }
 
@@ -439,7 +412,8 @@ class program_argument_token_view
             else {
                 auto const name = *current;
                 if (++current == std::ranges::end(parent->range)) {
-                    throw invalid_input{join(name, " is missing an argument")};
+                    throw invalid_program_argument{
+                        join(name, " is missing an argument")};
                 }
                 tok = option_token{name, *current, idx};
             }
@@ -453,7 +427,8 @@ class program_argument_token_view
                 name[1] = f;
                 auto const [is_flag, idx_] = match_option(name);
                 if (!is_flag) {
-                    throw invalid_input{join(name, " is not a flag")};
+                    throw invalid_program_argument{
+                        join(name, " is not a flag")};
                 }
                 flags_buffer.emplace_back(name, idx_);
             }
@@ -586,7 +561,7 @@ class cli {
     bool has_multi_argument = false;
 
    public:
-    template <to_option_argument_bindable T>
+    template <from_string_parsable T>
     auto add_option(T& var, std::string name, std::string shorthand = "")
     {
         validate_option_specification(name, shorthand, opts);
@@ -660,7 +635,7 @@ class cli {
                 auto const num_args_left = args.end() - (arg_it + 1);
                 auto const limit = tokens.end() - num_args_left;
                 if (token_it > limit) {
-                    throw invalid_input{"Wrong number of arguments"};
+                    throw invalid_program_argument{"Wrong number of arguments"};
                 }
                 while (token_it < limit) {
                     container.push_back_parsed(token_it->value);
@@ -669,7 +644,7 @@ class cli {
             }};
         while (arg_it < args.end()) {
             if (token_it == tokens.end()) {
-                throw invalid_input("Wrong number of arguments");
+                throw invalid_program_argument("Wrong number of arguments");
             }
             std::visit(bound_variable_visitor, arg_it->bound_var);
             ++arg_it;

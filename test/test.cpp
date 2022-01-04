@@ -16,7 +16,9 @@ TEST_CASE("missing positional argument")
     auto arg1 = ""s;
     auto cli = libcli::cli{};
     cli.add_argument(arg1);
-    REQUIRE_THROWS_AS(cli.parse({"app_name"}), libcli::invalid_input);
+    REQUIRE_THROWS_AS(
+        cli.parse({"app_name"}),
+        libcli::invalid_program_argument);
 }
 
 TEST_CASE("unknown option")
@@ -26,12 +28,14 @@ TEST_CASE("unknown option")
     {
         REQUIRE_THROWS_AS(
             cli.parse({"app_name", "--unspecified"}),
-            libcli::invalid_input);
+            libcli::invalid_program_argument);
     }
 
     SECTION("by shorthand")
     {
-        REQUIRE_THROWS_AS(cli.parse({"app_name", "-u"}), libcli::invalid_input);
+        REQUIRE_THROWS_AS(
+            cli.parse({"app_name", "-u"}),
+            libcli::invalid_program_argument);
     }
 }
 
@@ -58,7 +62,7 @@ TEST_CASE("parse flag")
     {
         REQUIRE_THROWS_AS(
             cli.parse({"app_name", "--flag=1"}),
-            libcli::invalid_input);
+            libcli::invalid_program_argument);
     }
 }
 
@@ -85,14 +89,14 @@ TEST_CASE("parse option")
     {
         REQUIRE_THROWS_AS(
             cli.parse({"app_name", "--option"}),
-            libcli::invalid_input);
+            libcli::invalid_program_argument);
     }
 
     SECTION("-option")
     {
         REQUIRE_THROWS_AS(
             cli.parse({"app_name", "--option"}),
-            libcli::invalid_input);
+            libcli::invalid_program_argument);
     }
 
     SECTION("-o 1")
@@ -113,14 +117,14 @@ TEST_CASE("parse option")
     {
         REQUIRE_THROWS_AS(
             cli.parse({"app_name", "-o"}),
-            libcli::invalid_input);
+            libcli::invalid_program_argument);
     }
 
     SECTION("--o")
     {
         REQUIRE_THROWS_AS(
             cli.parse({"app_name", "--option"}),
-            libcli::invalid_input);
+            libcli::invalid_program_argument);
     }
 }
 
@@ -128,7 +132,11 @@ struct S {
     std::string str;
 };
 
-void parse(std::string_view in, S& out) { out.str = in; };
+auto operator>>(std::istream& is, S& out) -> std::istream&
+{
+    is >> out.str;
+    return is;
+};
 
 TEST_CASE("adl")
 {
