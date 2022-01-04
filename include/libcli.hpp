@@ -457,18 +457,16 @@ class program_argument_token_view
 
         void process_adjacent_flags(std::size_t idx)
         {
-            std::ranges::for_each(
-                current->rbegin(),
-                current->rend() - 1,
-                [&](auto f) {
-                    auto name = "- "s;
-                    name[1] = f;
-                    auto const [is_flag, idx_] = match_option(name);
-                    if (!is_flag) {
-                        throw invalid_input{join(name, " is not a flag")};
-                    }
-                    flags_buffer.emplace_back(name, idx_);
-                });
+            for (auto const f :
+                 *current | std::views::drop(1) | std::views::reverse) {
+                auto name = "- "s;
+                name[1] = f;
+                auto const [is_flag, idx_] = match_option(name);
+                if (!is_flag) {
+                    throw invalid_input{join(name, " is not a flag")};
+                }
+                flags_buffer.emplace_back(name, idx_);
+            }
             tok = flag_token{current->substr(2), idx};
         }
     };
@@ -569,7 +567,7 @@ inline void validate_uniqueness(
     std::string_view shorthand,
     std::vector<option> const& opts)
 {
-    std::for_each(opts.begin(), opts.end(), [&](auto const& o) {
+    for (auto const& o : opts) {
         if (o.name == name) {
             throw invalid_cli_definition{join(name, " is already defined")};
         }
@@ -577,7 +575,7 @@ inline void validate_uniqueness(
             throw invalid_cli_definition{
                 join(shorthand, " is already defined")};
         }
-    });
+    }
 }
 
 inline void validate_option_specification(
