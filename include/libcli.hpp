@@ -30,7 +30,7 @@ overloaded(Ts...) -> overloaded<Ts...>;
 
 // todo visitor concept
 template <std::input_iterator I, std::sentinel_for<I> S, typename V>
-inline void visit_each(I first, S last, V&& v)
+constexpr void visit_each(I first, S last, V&& v)
 {
     while (first != last) {
         std::visit(v, *first);
@@ -39,7 +39,7 @@ inline void visit_each(I first, S last, V&& v)
 }
 
 template <std::ranges::input_range R, typename V>
-inline void visit_each(R&& range, V&& v)
+constexpr void visit_each(R&& range, V&& v)
 {
     visit_each(std::ranges::begin(range), std::ranges::end(range), v);
 }
@@ -64,9 +64,9 @@ class arrow_proxy {
     T t;
 
    public:
-    explicit arrow_proxy(T&& t) : t{std::forward<T>(t)} {}
+    constexpr explicit arrow_proxy(T&& t) : t{std::forward<T>(t)} {}
 
-    auto operator->() -> T* { return &t; }
+    constexpr auto operator->() -> T* { return &t; }
 };
 
 }  // namespace detail
@@ -331,16 +331,16 @@ class program_argument_token_view
     };
 
     class iterator_impl {
-        program_argument_token_view* parent;
-        std::ranges::iterator_t<R> current;
+        program_argument_token_view const* parent;
+        std::ranges::iterator_t<R const> current;
         std::optional<token> tok;
         std::vector<flag_token> flags_buffer;
         bool are_options_terminated = false;
 
        public:
         iterator_impl(
-            program_argument_token_view* parent,
-            std::ranges::iterator_t<R> cursor)
+            program_argument_token_view const* parent,
+            std::ranges::iterator_t<R const> cursor)
             : parent{parent}, current{cursor}
         {
             next();
@@ -484,8 +484,8 @@ class program_argument_token_view
         iterator() = default;
 
         iterator(
-            program_argument_token_view* parent,
-            std::ranges::iterator_t<R> cursor)
+            program_argument_token_view const* parent,
+            std::ranges::iterator_t<R const> cursor)
             : pimpl{std::make_shared<iterator_impl>(parent, cursor)}
         {
         }
@@ -531,9 +531,9 @@ class program_argument_token_view
     {
     }
 
-    auto begin() { return iterator{this, std::ranges::begin(range)}; }
+    auto begin() const { return iterator{this, std::ranges::begin(range)}; }
 
-    auto end() { return sentinel{}; }
+    auto end() const { return sentinel{}; }
 };
 
 inline void validate_option_name(std::string_view name)
@@ -621,12 +621,13 @@ class cli {
     {
         using namespace std::ranges;
         if (argc <= 0) { throw std::logic_error{"Input cannot be empty"}; }
-        auto const args_view =
+        auto const args =
             subrange{argv + 1, argv + argc}
             | views::transform([](auto x) { return std::string{x}; });
-        auto const args = std::vector(args_view.begin(), args_view.end());
-        auto unmatched =
-            parse_options(detail::program_argument_token_view{args, opts});
+        auto const tokens = detail::program_argument_token_view{
+            std::vector(args.begin(), args.end()),
+            opts};
+        auto const unmatched = parse_options(tokens);
         parse_positional_arguments(unmatched);
     }
 
