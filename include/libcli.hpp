@@ -59,16 +59,6 @@ inline auto join(Ts&&... ts) -> std::string
     return ss.str();
 }
 
-template <typename T>
-class arrow_proxy {
-    T t;
-
-   public:
-    constexpr explicit arrow_proxy(T&& t) : t{std::forward<T>(t)} {}
-
-    constexpr auto operator->() -> T* { return &t; }
-};
-
 }  // namespace detail
 
 struct invalid_cli_definition : public std::invalid_argument {
