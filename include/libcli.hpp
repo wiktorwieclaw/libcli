@@ -307,35 +307,23 @@ struct argument {
 
 struct positional_token {
     std::string value;
-
-    explicit positional_token(std::string_view value) : value{value} {}
 };
 
 struct option_token {
     std::string name;
     std::string value;
     std::size_t option_idx;
-
-    option_token(std::string_view name, std::string_view value, std::size_t idx)
-        : name{name}, value{value}, option_idx{idx}
-    {
-    }
 };
 
 struct flag_token {
     std::string name;
     std::size_t flag_idx;
-
-    flag_token(std::string_view name, std::size_t idx)
-        : name{name}, flag_idx{idx}
-    {
-    }
 };
 
 using token = std::variant<positional_token, option_token, flag_token>;
 
 template <std::ranges::input_range R>
-    requires std::same_as<std::ranges::range_value_t<R>, std::string_view>
+    requires std::same_as<std::ranges::range_value_t<R>, std::string>
 class program_argument_token_view
     : std::ranges::view_interface<program_argument_token_view<R>>  //
 {
@@ -637,7 +625,7 @@ class cli {
         if (argc <= 0) { throw std::logic_error{"Input cannot be empty"}; }
         auto const args_view =
             subrange{argv + 1, argv + argc}
-            | views::transform([](auto x) { return std::string_view{x}; });
+            | views::transform([](auto x) { return std::string{x}; });
         auto const args = std::vector(args_view.begin(), args_view.end());
         auto unmatched =
             parse_options(detail::program_argument_token_view{args, opts});
