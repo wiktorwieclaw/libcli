@@ -309,11 +309,6 @@ struct positional_token {
     std::string value;
 
     explicit positional_token(std::string_view value) : value{value} {}
-
-    auto operator==(positional_token const& other) const -> bool
-    {
-        return value == other.value;
-    }
 };
 
 struct option_token {
@@ -325,25 +320,15 @@ struct option_token {
         : name{name}, value{value}, option_idx{idx}
     {
     }
-
-    auto operator==(option_token const& other) const -> bool
-    {
-        return name == other.name && value == other.value;
-    }
 };
 
 struct flag_token {
     std::string name;
     std::size_t flag_idx;
 
-    explicit flag_token(std::string_view name, std::size_t idx)
+    flag_token(std::string_view name, std::size_t idx)
         : name{name}, flag_idx{idx}
     {
-    }
-
-    auto operator==(flag_token const& other) const -> bool
-    {
-        return name == other.name;
     }
 };
 
