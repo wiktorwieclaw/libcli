@@ -45,6 +45,9 @@ constexpr void visit_each(R&& range, V&& v)
 }
 
 template <typename T>
+using value_t = typename T::value_type;
+
+template <typename T>
 inline constexpr auto is_vector = false;
 
 template <typename T>
@@ -80,13 +83,6 @@ template <typename T>
 concept from_istream_readable = requires(std::istream& is, T& x) {
     { is >> x } -> std::convertible_to<std::istream&>;
 };;
-
-template <typename T>
-concept from_string_parsable =
-    from_istream_readable<T>
-    || (detail::is_optional<T>
-        && std::semiregular<typename T::value_type>
-        && from_istream_readable<typename T::value_type>);;
 // clang-format on
 
 namespace detail {
@@ -104,14 +100,6 @@ inline void parse(std::string_view input, T& out)
     }
 }
 
-template <from_istream_readable T>
-    requires std::semiregular<T>
-inline void parse(std::string_view input, std::optional<T>& out)
-{
-    out = T{};
-    parse(input, *out);
-}
-
 class bound_flag {
     bool* var_ptr;
 
@@ -126,7 +114,7 @@ struct bound_value_storage_base {
     virtual void assign_parsed(std::string_view input) const = 0;
 };
 
-template <from_string_parsable T>
+template <from_istream_readable T>
 class bound_value_storage : public bound_value_storage_base {
     T* var_ptr;
 
@@ -139,13 +127,37 @@ class bound_value_storage : public bound_value_storage_base {
     }
 };
 
+template <from_istream_readable T>
+    requires std::default_initializable<T>
+class bound_optional_value_storage : public bound_value_storage_base {
+    std::optional<T>* var_ptr;
+
+   public:
+    explicit bound_optional_value_storage(std::optional<T>& var) : var_ptr{&var}
+    {
+    }
+
+    void assign_parsed(std::string_view input) const final
+    {
+        var_ptr->emplace();
+        parse(input, **var_ptr);
+    }
+};
+
 class bound_value {
     std::unique_ptr<bound_value_storage_base> storage_ptr;
 
    public:
-    template <from_string_parsable T>
+    template <from_istream_readable T>
     explicit bound_value(T& var)
         : storage_ptr{std::make_unique<bound_value_storage<T>>(var)}
+    {
+    }
+
+    template <from_istream_readable T>
+        requires std::default_initializable<T>
+    explicit bound_value(std::optional<T>& var)
+        : storage_ptr{std::make_unique<bound_optional_value_storage<T>>(var)}
     {
     }
 
@@ -162,7 +174,7 @@ struct bound_container_storage_base {
     virtual auto size() const -> std::size_t = 0;
 };
 
-template <from_string_parsable T>
+template <from_istream_readable T>
     requires std::default_initializable<T>
 class bound_container_storage : public bound_container_storage_base {
     std::vector<T>* var_ptr;
@@ -182,7 +194,7 @@ class bound_container {
     std::unique_ptr<bound_container_storage_base> storage_ptr;
 
    public:
-    template <from_string_parsable T>
+    template <from_istream_readable T>
         requires std::default_initializable<T>
     explicit bound_container(std::vector<T>& var)
         : storage_ptr{std::make_unique<bound_container_storage<T>>(var)}
@@ -197,8 +209,15 @@ class bound_container {
     auto size() const -> std::size_t { return storage_ptr->size(); }
 };
 
-template <from_string_parsable T>
+template <from_istream_readable T>
 inline auto make_bound_variable(T& var) -> bound_value
+{
+    return bound_value{var};
+}
+
+template <from_istream_readable T>
+    requires std::default_initializable<T>
+inline auto make_bound_variable(std::optional<T>& var) -> bound_value
 {
     return bound_value{var};
 }
@@ -208,7 +227,7 @@ inline auto make_bound_variable(bool& var) -> bound_flag
     return bound_flag{var};
 }
 
-template <from_string_parsable T>
+template <from_istream_readable T>
     requires std::default_initializable<T>
 inline auto make_bound_variable(std::vector<T>& var) -> bound_container
 {
@@ -219,11 +238,18 @@ inline auto make_bound_variable(std::vector<T>& var) -> bound_container
 
 // clang-format off
 template <typename T>
+concept to_optional_argument_bindable =
+    from_istream_readable<T>
+    || (detail::is_optional<T>
+        && std::default_initializable<detail::value_t<T>>
+        && from_istream_readable<detail::value_t<T>>);;
+
+template <typename T>
 concept to_positional_argument_bindable =
-    from_string_parsable<T>
+    from_istream_readable<T>
     || (detail::is_vector<T>
         && std::default_initializable<std::ranges::range_value_t<T>>
-        && from_string_parsable<std::ranges::range_value_t<T>>);;
+        && from_istream_readable<std::ranges::range_value_t<T>>);;
 // clang-format on
 
 namespace detail {
@@ -235,7 +261,7 @@ struct option {
     std::string name;
     std::string shorthand;
 
-    template <from_string_parsable T>
+    template <to_optional_argument_bindable T>
     option(std::string long_name, std::string short_name, T& var)
         : bound_var{make_bound_variable(var)},
           name{std::move(long_name)},
@@ -562,7 +588,7 @@ class cli {
     bool has_multi_argument = false;
 
    public:
-    template <from_string_parsable T>
+    template <to_optional_argument_bindable T>
     auto add_option(T& var, std::string name, std::string shorthand = "")
     {
         validate_option_specification(name, shorthand, opts);
