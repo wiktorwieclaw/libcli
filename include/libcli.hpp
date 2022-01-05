@@ -28,22 +28,6 @@ struct overloaded : Ts... {
 template <typename... Ts>
 overloaded(Ts...) -> overloaded<Ts...>;
 
-// todo visitor concept
-template <std::input_iterator I, std::sentinel_for<I> S, typename V>
-constexpr void visit_each(I first, S last, V&& v)
-{
-    while (first != last) {
-        std::visit(v, *first);
-        ++first;
-    }
-}
-
-template <std::ranges::input_range R, typename V>
-constexpr void visit_each(R&& range, V&& v)
-{
-    visit_each(std::ranges::begin(range), std::ranges::end(range), v);
-}
-
 template <typename T>
 using value_t = typename T::value_type;
 
@@ -646,7 +630,7 @@ class cli {
             [&](detail::option_token const& tok) {
                 opts[tok.option_idx].write_parsed(tok.value);
             }};
-        visit_each(tokens, token_visitor);
+        for (const auto& tok : tokens) { std::visit(token_visitor, tok); }
         return unmatched;
     }
 
