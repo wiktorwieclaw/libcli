@@ -501,7 +501,7 @@ class cli {
     bool has_multi_argument = false;
 
    public:
-    void add_option(bool& var, std::string name, std::string shorthand = "")
+    void add_option(bool& var, std::string name, std::string shorthand)
     {
         add_option_impl(
             detail::bound_flag{var},
@@ -510,7 +510,7 @@ class cli {
     }
 
     template <istreamable T>
-    void add_option(T& var, std::string name, std::string shorthand = "")
+    void add_option(T& var, std::string name, std::string shorthand)
     {
         add_option_impl(
             detail::bound_value{var},
@@ -523,7 +523,7 @@ class cli {
     void add_option(
         std::optional<T>& var,
         std::string name,
-        std::string shorthand = "")
+        std::string shorthand)
     {
         add_option_impl(
             detail::bound_value{var},
