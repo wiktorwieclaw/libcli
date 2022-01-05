@@ -297,14 +297,14 @@ struct flag_token {
 
 using token = std::variant<positional_token, option_token, flag_token>;
 
-class program_argument_token_view
-    : std::ranges::view_interface<program_argument_token_view>  //
+class program_arguments_token_view
+    : std::ranges::view_interface<program_arguments_token_view>  //
 {
     struct sentinel {
     };
 
     class iterator_impl {
-        program_argument_token_view const* parent;
+        program_arguments_token_view const* parent;
         std::vector<std::string>::const_iterator current;
         std::optional<token> tok;
         std::vector<flag_token> flags_buffer;
@@ -312,7 +312,7 @@ class program_argument_token_view
 
        public:
         iterator_impl(
-            program_argument_token_view const* parent,
+            program_arguments_token_view const* parent,
             std::vector<std::string>::const_iterator cursor)
             : parent{parent}, current{cursor}
         {
@@ -455,13 +455,11 @@ class program_argument_token_view
         using iterator_category = std::input_iterator_tag;
         using difference_type = std::ptrdiff_t;
         using value_type = token;
-        using reference = token const&;
-        using pointer = token const*;
 
         iterator() = default;
 
         iterator(
-            program_argument_token_view const* parent,
+            program_arguments_token_view const* parent,
             std::vector<std::string>::const_iterator cursor)
             : pimpl{std::make_shared<iterator_impl>(parent, cursor)}
         {
@@ -481,9 +479,7 @@ class program_argument_token_view
             return temp;
         }
 
-        auto operator*() const -> reference { return pimpl->value(); }
-
-        auto operator->() const -> pointer { return &**this; }
+        auto operator*() const -> value_type { return pimpl->value(); }
 
         friend auto operator==(iterator const& it, sentinel const&) -> bool
         {
@@ -503,7 +499,7 @@ class program_argument_token_view
     std::vector<option> const* opts;
 
    public:
-    program_argument_token_view(
+    program_arguments_token_view(
         std::vector<std::string> strs,
         std::vector<option> const& opts)
         : strs{std::move(strs)}, opts{&opts}
@@ -603,7 +599,7 @@ class cli {
         auto const args =
             subrange{argv + 1, argv + argc}
             | views::transform([](auto x) { return std::string{x}; });
-        auto const tokens = detail::program_argument_token_view{
+        auto const tokens = detail::program_arguments_token_view{
             std::vector(args.begin(), args.end()),
             opts};
         auto const unmatched = parse_options(tokens);
@@ -616,7 +612,7 @@ class cli {
     }
 
    private:
-    auto parse_options(const detail::program_argument_token_view& tokens)
+    auto parse_options(const detail::program_arguments_token_view& tokens)
         -> std::vector<detail::positional_token>
     {
         auto unmatched = std::vector<detail::positional_token>{};
@@ -630,7 +626,7 @@ class cli {
             [&](detail::option_token const& tok) {
                 opts[tok.option_idx].write_parsed(tok.value);
             }};
-        for (const auto& tok : tokens) { std::visit(token_visitor, tok); }
+        for (const auto tok : tokens) { std::visit(token_visitor, tok); }
         return unmatched;
     }
 
