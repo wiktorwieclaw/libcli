@@ -28,21 +28,6 @@ struct overloaded : Ts... {
 template <typename... Ts>
 overloaded(Ts...) -> overloaded<Ts...>;
 
-template <typename T>
-using value_t = typename T::value_type;
-
-template <typename T>
-inline constexpr auto is_vector = false;
-
-template <typename T>
-inline constexpr auto is_vector<std::vector<T>> = true;
-
-template <typename T>
-inline constexpr auto is_optional = false;
-
-template <typename T>
-inline constexpr auto is_optional<std::optional<T>> = true;
-
 template <typename... Ts>
 inline auto join(Ts&&... ts) -> std::string
 {
@@ -64,7 +49,7 @@ struct invalid_program_argument : public std::runtime_error {
 
 // clang-format off
 template <typename T>
-concept from_istream_readable = requires(std::istream& is, T& x) {
+concept istreamable = requires(std::istream& is, T& x) {
     { is >> x } -> std::convertible_to<std::istream&>;
 };;
 // clang-format on
@@ -76,7 +61,7 @@ inline void from_string(std::string_view input, std::string& out)
     out = input;
 }
 
-template <from_istream_readable T>
+template <istreamable T>
 inline void from_string(std::string_view input, T& out)
 {
     auto ss = std::stringstream{};
@@ -95,56 +80,54 @@ class bound_flag {
     void assign(bool x) { *var_ptr = x; }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
-struct bound_value_storage_base {
-    virtual ~bound_value_storage_base() = default;
-    virtual void assign_parsed(std::string_view input) const = 0;
-};
-
-template <from_istream_readable T>
-class bound_value_storage : public bound_value_storage_base {
-    T* var_ptr;
-
-   public:
-    explicit bound_value_storage(T& var) : var_ptr{&var} {}
-
-    void assign_parsed(std::string_view input) const final
-    {
-        from_string(input, *var_ptr);
-    }
-};
-
-template <from_istream_readable T>
-    requires std::default_initializable<T>
-class bound_optional_value_storage : public bound_value_storage_base {
-    std::optional<T>* var_ptr;
-
-   public:
-    explicit bound_optional_value_storage(std::optional<T>& var) : var_ptr{&var}
-    {
-    }
-
-    void assign_parsed(std::string_view input) const final
-    {
-        var_ptr->emplace();
-        from_string(input, **var_ptr);
-    }
-};
-
 class bound_value {
-    std::unique_ptr<bound_value_storage_base> storage_ptr;
+    // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
+    struct storage_base {
+        virtual ~storage_base() = default;
+        virtual void assign_parsed(std::string_view input) const = 0;
+    };
+
+    template <istreamable T>
+    class storage : public storage_base {
+        T* var_ptr;
+
+       public:
+        explicit storage(T& var) : var_ptr{&var} {}
+
+        void assign_parsed(std::string_view input) const final
+        {
+            from_string(input, *var_ptr);
+        }
+    };
+
+    template <istreamable T>
+        requires std::default_initializable<T>
+    class optional_storage : public storage_base {
+        std::optional<T>* var_ptr;
+
+       public:
+        explicit optional_storage(std::optional<T>& var) : var_ptr{&var} {}
+
+        void assign_parsed(std::string_view input) const final
+        {
+            var_ptr->emplace();
+            from_string(input, **var_ptr);
+        }
+    };
+
+    std::unique_ptr<storage_base> storage_ptr;
 
    public:
-    template <from_istream_readable T>
+    template <istreamable T>
     explicit bound_value(T& var)
-        : storage_ptr{std::make_unique<bound_value_storage<T>>(var)}
+        : storage_ptr{std::make_unique<storage<T>>(var)}
     {
     }
 
-    template <from_istream_readable T>
+    template <istreamable T>
         requires std::default_initializable<T>
     explicit bound_value(std::optional<T>& var)
-        : storage_ptr{std::make_unique<bound_optional_value_storage<T>>(var)}
+        : storage_ptr{std::make_unique<optional_storage<T>>(var)}
     {
     }
 
@@ -154,37 +137,37 @@ class bound_value {
     }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
-struct bound_container_storage_base {
-    virtual ~bound_container_storage_base() = default;
-    virtual void push_back_parsed(std::string_view input) const = 0;
-    virtual auto size() const -> std::size_t = 0;
-};
-
-template <from_istream_readable T>
-    requires std::default_initializable<T>
-class bound_container_storage : public bound_container_storage_base {
-    std::vector<T>* var_ptr;
-
-   public:
-    explicit bound_container_storage(std::vector<T>& var) : var_ptr{&var} {}
-
-    void push_back_parsed(std::string_view input) const final
-    {
-        from_string(input, var_ptr->emplace_back());
-    }
-
-    auto size() const -> std::size_t final { return var_ptr->size(); }
-};
-
 class bound_container {
-    std::unique_ptr<bound_container_storage_base> storage_ptr;
+    // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
+    struct storage_base {
+        virtual ~storage_base() = default;
+        virtual void push_back_parsed(std::string_view input) const = 0;
+        virtual auto size() const -> std::size_t = 0;
+    };
+
+    template <istreamable T>
+        requires std::default_initializable<T>
+    class storage : public storage_base {
+        std::vector<T>* var_ptr;
+
+       public:
+        explicit storage(std::vector<T>& var) : var_ptr{&var} {}
+
+        void push_back_parsed(std::string_view input) const final
+        {
+            from_string(input, var_ptr->emplace_back());
+        }
+
+        auto size() const -> std::size_t final { return var_ptr->size(); }
+    };
+
+    std::unique_ptr<storage_base> storage_ptr;
 
    public:
-    template <from_istream_readable T>
+    template <istreamable T>
         requires std::default_initializable<T>
     explicit bound_container(std::vector<T>& var)
-        : storage_ptr{std::make_unique<bound_container_storage<T>>(var)}
+        : storage_ptr{std::make_unique<storage<T>>(var)}
     {
     }
 
@@ -196,65 +179,12 @@ class bound_container {
     auto size() const -> std::size_t { return storage_ptr->size(); }
 };
 
-template <from_istream_readable T>
-inline auto make_bound_variable(T& var) -> bound_value
-{
-    return bound_value{var};
-}
-
-template <from_istream_readable T>
-    requires std::default_initializable<T>
-inline auto make_bound_variable(std::optional<T>& var) -> bound_value
-{
-    return bound_value{var};
-}
-
-inline auto make_bound_variable(bool& var) -> bound_flag
-{
-    return bound_flag{var};
-}
-
-template <from_istream_readable T>
-    requires std::default_initializable<T>
-inline auto make_bound_variable(std::vector<T>& var) -> bound_container
-{
-    return bound_container{var};
-}
-
-}  // namespace detail
-
-// clang-format off
-template <typename T>
-concept to_optional_argument_bindable =
-    from_istream_readable<T>
-    || (detail::is_optional<T>
-        && std::default_initializable<detail::value_t<T>>
-        && from_istream_readable<detail::value_t<T>>);;
-
-template <typename T>
-concept to_positional_argument_bindable =
-    from_istream_readable<T>
-    || (detail::is_vector<T>
-        && std::default_initializable<std::ranges::range_value_t<T>>
-        && from_istream_readable<std::ranges::range_value_t<T>>);;
-// clang-format on
-
-namespace detail {
-
 struct option {
     using bound_variable = std::variant<bound_flag, bound_value>;
 
     bound_variable bound_var;
     std::string name;
     std::string shorthand;
-
-    template <to_optional_argument_bindable T>
-    option(std::string long_name, std::string short_name, T& var)
-        : bound_var{make_bound_variable(var)},
-          name{std::move(long_name)},
-          shorthand{std::move(short_name)}
-    {
-    }
 
     auto is_flag() const -> bool
     {
@@ -273,11 +203,6 @@ struct argument {
     using bound_variable = std::variant<bound_value, bound_container>;
 
     bound_variable bound_var;
-
-    template <to_positional_argument_bindable T>
-    explicit argument(T& var) : bound_var{make_bound_variable(var)}
-    {
-    }
 };
 
 struct positional_token {
@@ -565,30 +490,63 @@ inline void validate_option_specification(
 
 }  // namespace detail
 
+struct multi_t {
+};
+
+inline constexpr auto multi = multi_t{};
+
 class cli {
     std::vector<detail::option> opts;
     std::vector<detail::argument> args;
     bool has_multi_argument = false;
 
    public:
-    template <to_optional_argument_bindable T>
-    auto add_option(T& var, std::string name, std::string shorthand = "")
+    void add_option(bool& var, std::string name, std::string shorthand = "")
     {
-        validate_option_specification(name, shorthand, opts);
-        opts.emplace_back(std::move(name), std::move(shorthand), var);
+        add_option_impl(
+            detail::bound_flag{var},
+            std::move(name),
+            std::move(shorthand));
     }
 
-    template <to_positional_argument_bindable T>
+    template <istreamable T>
+    void add_option(T& var, std::string name, std::string shorthand = "")
+    {
+        add_option_impl(
+            detail::bound_value{var},
+            std::move(name),
+            std::move(shorthand));
+    }
+
+    template <istreamable T>
+        requires std::default_initializable<T>
+    void add_option(
+        std::optional<T>& var,
+        std::string name,
+        std::string shorthand = "")
+    {
+        add_option_impl(
+            detail::bound_value{var},
+            std::move(name),
+            std::move(shorthand));
+    }
+
+    template <istreamable T>
     void add_argument(T& var)
     {
-        auto const& ref = args.emplace_back(var);
-        if (std::holds_alternative<detail::bound_container>(ref.bound_var)) {
-            if (has_multi_argument) {
-                throw invalid_cli_definition{
-                    "There cannot be more than one multi-argument"};
-            }
-            has_multi_argument = true;
+        args.emplace_back(detail::bound_value{var});
+    }
+
+    template <istreamable T>
+        requires std::default_initializable<T>
+    void add_argument(multi_t, std::vector<T>& var)
+    {
+        args.emplace_back(detail::bound_container{var});
+        if (has_multi_argument) {
+            throw invalid_cli_definition{
+                "There cannot be more than one multi-argument"};
         }
+        has_multi_argument = true;
     }
 
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
@@ -612,6 +570,18 @@ class cli {
     }
 
    private:
+    void add_option_impl(
+        detail::option::bound_variable var,
+        std::string name,
+        std::string shorthand)
+    {
+        validate_option_specification(name, shorthand, opts);
+        opts.emplace_back(
+            std::move(var),
+            std::move(name),
+            std::move(shorthand));
+    }
+
     auto parse_options(const detail::program_arguments_token_view& tokens)
         -> std::vector<detail::positional_token>
     {

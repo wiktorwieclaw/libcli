@@ -20,9 +20,9 @@ int main(int argc, char** argv) {
     std::string str2; 
     cli.add_argument(str2);
 
-    // std::vector denotes multi-argument
+    // multi-arguments can be defined using libcli::multi tag
     std::vector<std::string> sources;
-    cli.add_argument(sources);
+    cli.add_argument(libcli::multi, sources);
 
     try {
         cli.parse(argc, argv);

@@ -182,9 +182,9 @@ TEST_CASE("multi-argument")
         auto multi_arg_2 = std::vector<int>{};
 
         auto cli = libcli::cli{};
-        cli.add_argument(multi_arg_1);
+        cli.add_argument(libcli::multi, multi_arg_1);
         REQUIRE_THROWS_AS(
-            cli.add_argument(multi_arg_2),
+            cli.add_argument(libcli::multi, multi_arg_2),
             libcli::invalid_cli_definition);
     }
 
@@ -233,7 +233,7 @@ TEST_CASE("main test")
     cli.add_option(number, "--number", "-n");
     cli.add_option(is_pretty_print, "--pretty-print", "-p");
     cli.add_argument(pre_multiarg);
-    cli.add_argument(multiarg);
+    cli.add_argument(libcli::multi, multiarg);
     cli.add_argument(post_multiarg);
     cli.parse(argv.size(), argv.data());
 
