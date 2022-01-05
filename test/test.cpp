@@ -18,7 +18,7 @@ TEST_CASE("missing positional argument")
     cli.add_argument(arg1);
     REQUIRE_THROWS_AS(
         cli.parse({"app_name"}),
-        libcli::invalid_program_argument);
+        libcli::parsing_error);
 }
 
 TEST_CASE("unknown option")
@@ -28,14 +28,14 @@ TEST_CASE("unknown option")
     {
         REQUIRE_THROWS_AS(
             cli.parse({"app_name", "--unspecified"}),
-            libcli::invalid_program_argument);
+            libcli::parsing_error);
     }
 
     SECTION("by shorthand")
     {
         REQUIRE_THROWS_AS(
             cli.parse({"app_name", "-u"}),
-            libcli::invalid_program_argument);
+            libcli::parsing_error);
     }
 }
 
@@ -62,7 +62,7 @@ TEST_CASE("parse flag")
     {
         REQUIRE_THROWS_AS(
             cli.parse({"app_name", "--flag=1"}),
-            libcli::invalid_program_argument);
+            libcli::parsing_error);
     }
 }
 
@@ -89,14 +89,14 @@ TEST_CASE("parse option")
     {
         REQUIRE_THROWS_AS(
             cli.parse({"app_name", "--option"}),
-            libcli::invalid_program_argument);
+            libcli::parsing_error);
     }
 
     SECTION("-option")
     {
         REQUIRE_THROWS_AS(
             cli.parse({"app_name", "--option"}),
-            libcli::invalid_program_argument);
+            libcli::parsing_error);
     }
 
     SECTION("-o 1")
@@ -117,14 +117,14 @@ TEST_CASE("parse option")
     {
         REQUIRE_THROWS_AS(
             cli.parse({"app_name", "-o"}),
-            libcli::invalid_program_argument);
+            libcli::parsing_error);
     }
 
     SECTION("--o")
     {
         REQUIRE_THROWS_AS(
             cli.parse({"app_name", "--option"}),
-            libcli::invalid_program_argument);
+            libcli::parsing_error);
     }
 }
 
@@ -205,6 +205,20 @@ TEST_CASE("connected flags")
     REQUIRE(b == true);
 
     // TODO add case where one of the joined options is not a flag
+}
+
+TEST_CASE("std::optional<bool>")
+{
+    auto cli = libcli::cli{};
+    auto opt1 = std::optional<bool>{};
+    auto opt2 = std::optional<bool>{};
+    cli.add_option(opt1, "--opt1", "-o");
+    cli.add_option(opt2, "--opt2", "-O");
+    cli.parse({"app_name", "--opt1=1", "--opt2=0"});
+    REQUIRE(opt1.has_value() == true);
+    REQUIRE(opt1.value() == true);
+    REQUIRE(opt2.has_value() == true);
+    REQUIRE(opt2.value() == false);
 }
 
 TEST_CASE("main test")

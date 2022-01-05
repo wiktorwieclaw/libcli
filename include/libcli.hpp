@@ -43,7 +43,7 @@ struct invalid_cli_definition : public std::invalid_argument {
     using invalid_argument::invalid_argument;
 };
 
-struct invalid_program_argument : public std::runtime_error {
+struct parsing_error : public std::runtime_error {
     using runtime_error::runtime_error;
 };
 
@@ -68,7 +68,7 @@ inline void from_string(std::string_view input, T& out)
     ss << input;
     ss >> out;
     if (ss.fail()) {
-        throw invalid_program_argument(join(input, " is not a valid value"));
+        throw parsing_error(join(input, " is not a valid value"));
     }
 }
 
@@ -284,7 +284,7 @@ class program_arguments_token_view
                     return o.shorthand == str || o.name == str;
                 });
             if (it == parent->opts->end()) {
-                throw invalid_program_argument{join(str, " is not an option")};
+                throw parsing_error{join(str, " is not an option")};
             }
             return {
                 it->is_flag(),
@@ -337,7 +337,7 @@ class program_arguments_token_view
             auto const value = current->substr(pos + 1);
             auto const [is_flag, idx] = match_option(name);
             if (is_flag) {
-                throw invalid_program_argument{join(*current, " is invalid")};
+                throw parsing_error{join(*current, " is invalid")};
             }
             tok = option_token{name, value, idx};
         }
@@ -349,7 +349,7 @@ class program_arguments_token_view
             else {
                 auto const name = *current;
                 if (++current == parent->strs.end()) {
-                    throw invalid_program_argument{
+                    throw parsing_error{
                         join(name, " is missing an argument")};
                 }
                 tok = option_token{name, *current, idx};
@@ -364,7 +364,7 @@ class program_arguments_token_view
                 name[1] = f;
                 auto const [is_flag, idx_] = match_option(name);
                 if (!is_flag) {
-                    throw invalid_program_argument{
+                    throw parsing_error{
                         join(name, " is not a flag")};
                 }
                 flags_buffer.emplace_back(name, idx_);
@@ -614,7 +614,7 @@ class cli {
                 auto const num_args_left = args.end() - (arg_it + 1);
                 auto const limit = tokens.end() - num_args_left;
                 if (token_it > limit) {
-                    throw invalid_program_argument{"Wrong number of arguments"};
+                    throw parsing_error{"Wrong number of arguments"};
                 }
                 while (token_it < limit) {
                     container.push_back_parsed(token_it->value);
@@ -623,7 +623,7 @@ class cli {
             }};
         while (arg_it < args.end()) {
             if (token_it == tokens.end()) {
-                throw invalid_program_argument("Wrong number of arguments");
+                throw parsing_error{"Wrong number of arguments"};
             }
             std::visit(bound_variable_visitor, arg_it->bound_var);
             ++arg_it;

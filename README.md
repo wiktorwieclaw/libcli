@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
     try {
         cli.parse(argc, argv);
     }
-    catch (const libcli::invalid_program_argument& ex) {
+    catch (const libcli::parsing_error& ex) {
         std::cout << ex.what();
         return 1;
     }
