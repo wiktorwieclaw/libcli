@@ -87,10 +87,13 @@ concept from_istream_readable = requires(std::istream& is, T& x) {
 
 namespace detail {
 
-inline void parse(std::string_view input, std::string& out) { out = input; }
+inline void from_string(std::string_view input, std::string& out)
+{
+    out = input;
+}
 
 template <from_istream_readable T>
-inline void parse(std::string_view input, T& out)
+inline void from_string(std::string_view input, T& out)
 {
     auto ss = std::stringstream{};
     ss << input;
@@ -123,7 +126,7 @@ class bound_value_storage : public bound_value_storage_base {
 
     void assign_parsed(std::string_view input) const final
     {
-        parse(input, *var_ptr);
+        from_string(input, *var_ptr);
     }
 };
 
@@ -140,7 +143,7 @@ class bound_optional_value_storage : public bound_value_storage_base {
     void assign_parsed(std::string_view input) const final
     {
         var_ptr->emplace();
-        parse(input, **var_ptr);
+        from_string(input, **var_ptr);
     }
 };
 
@@ -184,7 +187,7 @@ class bound_container_storage : public bound_container_storage_base {
 
     void push_back_parsed(std::string_view input) const final
     {
-        parse(input, var_ptr->emplace_back());
+        from_string(input, var_ptr->emplace_back());
     }
 
     auto size() const -> std::size_t final { return var_ptr->size(); }
