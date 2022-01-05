@@ -85,7 +85,7 @@ template <typename T>
 concept from_string_parsable =
     from_istream_readable<T>
     || (detail::is_optional<T>
-        && std::default_initializable<typename T::value_type>
+        && std::semiregular<typename T::value_type>
         && from_istream_readable<typename T::value_type>);;
 // clang-format on
 
@@ -105,7 +105,7 @@ inline void parse(std::string_view input, T& out)
 }
 
 template <from_istream_readable T>
-    requires std::default_initializable<T>
+    requires std::semiregular<T>
 inline void parse(std::string_view input, std::optional<T>& out)
 {
     out = T{};
@@ -217,12 +217,13 @@ inline auto make_bound_variable(std::vector<T>& var) -> bound_container
 
 }  // namespace detail
 
+// clang-format off
 template <typename T>
-concept to_positional_argument_bindable = from_string_parsable<T> ||(
-    detail::is_vector<T>&&
-        std::default_initializable<std::ranges::range_value_t<T>>&&
-            from_string_parsable<std::ranges::range_value_t<T>>);
-;
+concept to_positional_argument_bindable =
+    from_string_parsable<T>
+    || (detail::is_vector<T>
+        && std::default_initializable<std::ranges::range_value_t<T>>
+        && from_string_parsable<std::ranges::range_value_t<T>>);;
 // clang-format on
 
 namespace detail {
@@ -283,17 +284,15 @@ struct flag_token {
 
 using token = std::variant<positional_token, option_token, flag_token>;
 
-template <std::ranges::input_range R>
-    requires std::same_as<std::ranges::range_value_t<R>, std::string>
 class program_argument_token_view
-    : std::ranges::view_interface<program_argument_token_view<R>>  //
+    : std::ranges::view_interface<program_argument_token_view>  //
 {
     struct sentinel {
     };
 
     class iterator_impl {
         program_argument_token_view const* parent;
-        std::ranges::iterator_t<R const> current;
+        std::vector<std::string>::const_iterator current;
         std::optional<token> tok;
         std::vector<flag_token> flags_buffer;
         bool are_options_terminated = false;
@@ -301,7 +300,7 @@ class program_argument_token_view
        public:
         iterator_impl(
             program_argument_token_view const* parent,
-            std::ranges::iterator_t<R const> cursor)
+            std::vector<std::string>::const_iterator cursor)
             : parent{parent}, current{cursor}
         {
             next();
@@ -314,14 +313,14 @@ class program_argument_token_view
                 flags_buffer.pop_back();
                 return;
             }
-            if (current == std::ranges::end(parent->range)) {
+            if (current == parent->strs.end()) {
                 tok.reset();
                 return;
             }
             if (*current == "--") {
                 are_options_terminated = true;
                 ++current;
-                if (current == std::ranges::end(parent->range)) {
+                if (current == parent->strs.end()) {
                     tok.reset();
                     return;
                 }
@@ -411,7 +410,7 @@ class program_argument_token_view
             if (is_flag) { tok = flag_token{*current, idx}; }
             else {
                 auto const name = *current;
-                if (++current == std::ranges::end(parent->range)) {
+                if (++current == parent->strs.end()) {
                     throw invalid_program_argument{
                         join(name, " is missing an argument")};
                 }
@@ -450,7 +449,7 @@ class program_argument_token_view
 
         iterator(
             program_argument_token_view const* parent,
-            std::ranges::iterator_t<R const> cursor)
+            std::vector<std::string>::const_iterator cursor)
             : pimpl{std::make_shared<iterator_impl>(parent, cursor)}
         {
         }
@@ -487,16 +486,18 @@ class program_argument_token_view
         }
     };
 
-    R range;
+    std::vector<std::string> strs;
     std::vector<option> const* opts;
 
    public:
-    program_argument_token_view(R range, std::vector<option> const& opts)
-        : range{std::move(range)}, opts{&opts}
+    program_argument_token_view(
+        std::vector<std::string> strs,
+        std::vector<option> const& opts)
+        : strs{std::move(strs)}, opts{&opts}
     {
     }
 
-    auto begin() const { return iterator{this, std::ranges::begin(range)}; }
+    auto begin() const { return iterator{this, strs.begin()}; }
 
     auto end() const { return sentinel{}; }
 };
@@ -602,9 +603,8 @@ class cli {
     }
 
    private:
-    template <std::ranges::input_range R>
-        requires std::same_as<std::ranges::range_value_t<R>, detail::token>
-    auto parse_options(R&& range) -> std::vector<detail::positional_token>
+    auto parse_options(const detail::program_argument_token_view& tokens)
+        -> std::vector<detail::positional_token>
     {
         auto unmatched = std::vector<detail::positional_token>{};
         auto token_visitor = detail::overloaded{
@@ -617,7 +617,7 @@ class cli {
             [&](detail::option_token const& tok) {
                 opts[tok.option_idx].write_parsed(tok.value);
             }};
-        visit_each(range, token_visitor);
+        visit_each(tokens, token_visitor);
         return unmatched;
     }
 
