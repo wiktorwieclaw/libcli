@@ -1,16 +1,50 @@
-```c++
-struct WindowSettings {
-    bool is_fullscreen = false;
-    int width = 800;
-    int height = 600;
-};
+# libcli
+Lightweight C++20 program arguments parser.
 
+## Examples
+### Basic usage
+```c++
+int main(int argc, char** argv) {
+    libcli::cli cli;
+
+    bool flag; 
+    cli.add_option(flag, "--flag", "-f");
+    
+    std::string str1; 
+    cli.add_option(str1, "--option", "-o");
+
+    // std::optional can be used for types with no proper sentinel value
+    std::optional<int> num;
+    cli.add_option(num, "--number", "-n");
+
+    std::string str2; 
+    cli.add_argument(str2);
+
+    // std::vector denotes multi-argument
+    std::vector<std::string> sources;
+    cli.add_argument(sources);
+
+    try {
+        cli.parse(argc, argv);
+    }
+    catch (const libcli::invalid_program_argument& ex) {
+        std::cout << ex.what();
+        return 1;
+    }
+
+    if (flag) { /* ... */ }
+    if (!str1.empty()) { /* ... */ }
+    if (num) { /* ... */ }
+}
+```
+
+### User defined types
+```c++
 enum class Scenery { Plains, Forest };
 
 // enables Scenery objects to bind to libcli::cli
 std::istream& operator>>(std::istream& is, Scenery& out) {
-    std::string str;
-    is >> str;
+    const std::string str(std::istreambuf_iterator<char>(is), {});
     const auto lc = to_lowercase(str);
     if (lc == "plains") { out = Scenery::Plains; }
     else if (lc == "forest") { out = Scenery::Forest; }
@@ -19,21 +53,9 @@ std::istream& operator>>(std::istream& is, Scenery& out) {
 }
 
 int main(int argc, char** argv) {
-    WindowSettings settings;
     Scenery scenery;
     
     libcli::cli cli;
-    cli.add_option(settings.is_fullscreen, "--fullscreen", "-f");
-    cli.add_option(settings.width, "--width", "-w");
-    cli.add_option(settings.height, "--height", "-h");
     cli.add_argument(scenery);
-    
-    try {
-        cli.parse(argc, argv);
-    }
-    catch (const libcli::invalid_program_arguments& ex) {
-        std::cout << ex.what();
-        return 1;
-    }
 }
 ```
