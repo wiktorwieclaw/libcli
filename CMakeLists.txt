@@ -21,3 +21,6 @@ target_include_directories(${PROJECT_NAME} INTERFACE include/)
 
 add_executable(test test/test.cpp)
 target_link_libraries(test PRIVATE ${PROJECT_NAME} Catch2::Catch2WithMain)
+
+add_executable(example_basic examples/basic.cpp)
+target_link_libraries(example_basic PRIVATE ${PROJECT_NAME})

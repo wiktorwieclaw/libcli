@@ -284,7 +284,7 @@ class program_arguments_token_view
                     return o.shorthand == str || o.name == str;
                 });
             if (it == parent->opts->end()) {
-                throw parsing_error{join(str, " is not an option")};
+                throw parsing_error{join(str, " is not a valid option")};
             }
             return {
                 it->is_flag(),
